@@ -1,0 +1,3 @@
+[submodule "ext/dumb/dumb-kode54-git"]
+	path = ext/dumb/dumb-kode54-git
+	url = git://github.com/kode54/dumb.git
