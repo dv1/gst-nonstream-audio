@@ -53,7 +53,7 @@ static GstClockTime gst_dumb_tell(GstNonstreamAudioDecoder *dec);
 
 static gboolean gst_dumb_load(GstNonstreamAudioDecoder *dec, GstBuffer *source_data);
 
-static gboolean gst_dumb_decode(GstNonstreamAudioDecoder *dec, GstBuffer **buffer, guint *num_samples, gdouble rate);
+static gboolean gst_dumb_decode(GstNonstreamAudioDecoder *dec, GstBuffer **buffer, guint *num_samples);
 
 static gboolean gst_dumb_init_sigrenderer(GstDumb *dumb, GstClockTime seek_pos);
 
@@ -175,7 +175,7 @@ static gboolean gst_dumb_load(GstNonstreamAudioDecoder *dec, GstBuffer *source_d
 	gst_nonstream_audio_decoder_set_duration(dec, duh_get_length(dumb->duh) * GST_SECOND / 65536);
 
 	{
-		char const *title;
+		char const *title, *message;
 		GstTagList *tags;
 
 		tags = gst_tag_list_new_empty();
@@ -183,6 +183,10 @@ static gboolean gst_dumb_load(GstNonstreamAudioDecoder *dec, GstBuffer *source_d
 		title = duh_get_tag(dumb->duh, "TITLE");
 		if (title != NULL)
 			gst_tag_list_add(tags, GST_TAG_MERGE_APPEND, GST_TAG_TITLE, title, NULL);
+
+		message = (char const*)(dumb_it_sd_get_song_message(duh_get_it_sigdata(dumb->duh)));
+		if (message != NULL)
+			gst_tag_list_add(tags, GST_TAG_MERGE_APPEND, GST_TAG_COMMENT, message, NULL);
 
 		gst_pad_push_event(GST_NONSTREAM_AUDIO_DECODER_SRC_PAD(dumb), gst_event_new_tag(tags));
 	}
@@ -192,7 +196,7 @@ static gboolean gst_dumb_load(GstNonstreamAudioDecoder *dec, GstBuffer *source_d
 }
 
 
-static gboolean gst_dumb_decode(GstNonstreamAudioDecoder *dec, GstBuffer **buffer, guint *num_samples, gdouble rate)
+static gboolean gst_dumb_decode(GstNonstreamAudioDecoder *dec, GstBuffer **buffer, guint *num_samples)
 {
 	GstDumb *dumb;
 	GstBuffer *outbuf;
@@ -204,9 +208,12 @@ static gboolean gst_dumb_decode(GstNonstreamAudioDecoder *dec, GstBuffer **buffe
 	num_samples_per_outbuf = 1024;
 	num_bytes_per_outbuf = num_samples_per_outbuf * dumb->num_channels * RENDER_BIT_DEPTH / 8;
 
-	outbuf = gst_buffer_new_allocate(NULL, num_bytes_per_outbuf, NULL);
+	outbuf = gst_nonstream_audio_decoder_allocate_output_buffer(dec, num_bytes_per_outbuf);
+	if (outbuf == NULL)
+		return FALSE;
+
 	gst_buffer_map(outbuf, &map, GST_MAP_WRITE);
-	actual_num_samples_read = duh_render(dumb->duh_sigrenderer, RENDER_BIT_DEPTH, 0, 1.0f, 65536.0f / dumb->sample_rate * rate, num_samples_per_outbuf, map.data);
+	actual_num_samples_read = duh_render(dumb->duh_sigrenderer, RENDER_BIT_DEPTH, 0, 1.0f, 65536.0f / dumb->sample_rate, num_samples_per_outbuf, map.data);
 	gst_buffer_unmap(outbuf, &map);
 
 	if (actual_num_samples_read == 0)

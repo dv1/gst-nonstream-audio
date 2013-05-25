@@ -45,6 +45,9 @@ struct _GstNonstreamAudioDecoder
 	GstAudioInfo audio_info;
 	gboolean output_format_changed;
 
+	GstAllocator *allocator;
+	GstAllocationParams allocation_params;
+
 	GRecMutex stream_lock;
 };
 
@@ -64,19 +67,27 @@ struct _GstNonstreamAudioDecoderClass
 	guint (*get_current_subsong)(GstNonstreamAudioDecoder *dec);
 	gboolean (*set_current_subsong)(GstNonstreamAudioDecoder *dec, guint subsong);
 
-	gboolean (*decode)(GstNonstreamAudioDecoder *dec, GstBuffer **buffer, guint *num_samples, gdouble rate);
+	gboolean (*decode)(GstNonstreamAudioDecoder *dec, GstBuffer **buffer, guint *num_samples);
 
 	gboolean (*negotiate)(GstNonstreamAudioDecoder *dec);
+
+	gboolean (*decide_allocation)(GstNonstreamAudioDecoder *dec, GstQuery *query);
+	gboolean (*propose_allocation)(GstNonstreamAudioDecoder *dec, GstQuery * query);
 };
 
 
 GType gst_nonstream_audio_decoder_get_type(void);
 
 void gst_nonstream_audio_decoder_set_duration(GstNonstreamAudioDecoder *dec, GstClockTime duration);
-void gst_nonstream_audio_decoder_set_subsongs(GstNonstreamAudioDecoder *dec, guint num_subsongs);
+
+void gst_nonstream_audio_decoder_init_subsong_properties(GstNonstreamAudioDecoderClass *klass);
+void gst_nonstream_audio_decoder_set_num_subsongs(GstNonstreamAudioDecoder *dec, guint num_subsongs);
+
 gboolean gst_nonstream_audio_decoder_set_output_audioinfo(GstNonstreamAudioDecoder *dec, GstAudioInfo const *info);
 gboolean gst_nonstream_audio_decoder_negotiate(GstNonstreamAudioDecoder *dec);
 void gst_nonstream_audio_decoder_get_downstream_format(GstNonstreamAudioDecoder *dec, gint *sample_rate, gint *num_channels);
+
+GstBuffer * gst_nonstream_audio_decoder_allocate_output_buffer(GstNonstreamAudioDecoder *dec, gsize size);
 
 
 G_END_DECLS

@@ -39,9 +39,11 @@ static gboolean gst_nonstream_audio_decoder_get_upstream_size(GstNonstreamAudioD
 static void gst_nonstream_audio_decoder_loop(GstNonstreamAudioDecoder *dec);
 
 static gboolean gst_nonstream_audio_decoder_negotiate_default(GstNonstreamAudioDecoder *dec);
+static gboolean gst_nonstream_audio_decoder_decide_allocation_default(GstNonstreamAudioDecoder *dec, GstQuery *query);
+static gboolean gst_nonstream_audio_decoder_propose_allocation_default(GstNonstreamAudioDecoder *dec, GstQuery *query);
 
-static void gst_nonstream_audio_decoder_set_property(GObject * object, guint prop_id, const GValue * value, GParamSpec * pspec);
-static void gst_nonstream_audio_decoder_get_property(GObject * object, guint prop_id, GValue * value, GParamSpec * pspec);
+static void gst_nonstream_audio_decoder_set_property(GObject *object, guint prop_id, const GValue *value, GParamSpec *pspec);
+static void gst_nonstream_audio_decoder_get_property(GObject *object, guint prop_id, GValue *value, GParamSpec *pspec);
 
 static void gst_nonstream_audio_decoder_finalize(GObject *object);
 
@@ -52,11 +54,10 @@ static GstElementClass *gst_nonstream_audio_decoder_parent_class = NULL;
 /*
 TODO:
 - hard-flush & reset functions (if these make sense with module etc. music)
-- allocators
-- type checks (GST_IS_NONSTREAM_AUDIO_DECODER etc.)
 - offset vs. tell()
-- reconfigure events coming from downstream and caps events from upstream
 - study GstAudioDecoder code more
+- what about negative playback rates ?
+- loops
 */
 
 
@@ -114,32 +115,6 @@ static void gst_nonstream_audio_decoder_class_init(GstNonstreamAudioDecoderClass
 	object_class->set_property = GST_DEBUG_FUNCPTR(gst_nonstream_audio_decoder_set_property);
 	object_class->get_property = GST_DEBUG_FUNCPTR(gst_nonstream_audio_decoder_get_property);
 
-	/* TODO: it should be possible to somehow disable subsongs in the class_init if subclass does not support them */
-	g_object_class_install_property(
-		object_class,
-		PROP_CURRENT_SUBSONG,
-		g_param_spec_uint(
-			"current-subsong",
-			"Currently active subsong",
-			"Subsong that is currently selected for playback",
-			0, G_MAXUINT,
-			DEFAULT_CURRENT_SUBSONG,
-			G_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY | G_PARAM_STATIC_STRINGS
-		)
-	);
-	g_object_class_install_property(
-		object_class,
-		PROP_NUM_SUBSONGS,
-		g_param_spec_uint(
-			"num-subsongs",
-			"Number of available subsongs",
-			"Subsongs available for playback (0 = media does not support subsongs)",
-			0, G_MAXUINT,
-			DEFAULT_NUM_SUBSONGS,
-			G_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY | G_PARAM_STATIC_STRINGS /* TODO: set this to read-only */
-		)
-	);
-
 	dec_class->seek = NULL;
 	dec_class->tell = NULL;
 	dec_class->load = NULL;
@@ -147,6 +122,8 @@ static void gst_nonstream_audio_decoder_class_init(GstNonstreamAudioDecoderClass
 	dec_class->set_current_subsong = NULL;
 	dec_class->decode = NULL;
 	dec_class->negotiate = GST_DEBUG_FUNCPTR(gst_nonstream_audio_decoder_negotiate_default);
+	dec_class->decide_allocation = GST_DEBUG_FUNCPTR(gst_nonstream_audio_decoder_decide_allocation_default);
+	dec_class->propose_allocation = GST_DEBUG_FUNCPTR(gst_nonstream_audio_decoder_propose_allocation_default);
 }
 
 
@@ -158,6 +135,7 @@ static void gst_nonstream_audio_decoder_init(GstNonstreamAudioDecoder *dec, GstN
 	dec->offset = 0;
 	dec->num_subsongs = DEFAULT_NUM_SUBSONGS;
 	dec->loaded = FALSE;
+	dec->allocator = NULL;
 
 	g_rec_mutex_init(&(dec->stream_lock));
 
@@ -217,6 +195,7 @@ static gboolean gst_nonstream_audio_decoder_src_event(GstPad *pad, GstObject *pa
 {
 	gboolean res;
 	GstNonstreamAudioDecoder *dec;
+	GstNonstreamAudioDecoderClass *dec_class;
 
 	res = FALSE;
 	dec = GST_NONSTREAM_AUDIO_DECODER(parent);
@@ -224,12 +203,16 @@ static gboolean gst_nonstream_audio_decoder_src_event(GstPad *pad, GstObject *pa
 	switch (GST_EVENT_TYPE(event))
 	{
 		case GST_EVENT_SEEK:
-			res = gst_nonstream_audio_decoder_do_seek(dec, event);
+			dec_class = GST_NONSTREAM_AUDIO_DECODER_GET_CLASS(dec);
+			if (dec_class->seek != NULL)
+				res = gst_nonstream_audio_decoder_do_seek(dec, event);
 			break;
 		default:
-			res = gst_pad_event_default(pad, parent, event);
 			break;
 	}
+
+	if (!res)
+		res = gst_pad_event_default(pad, parent, event);
 
 	return res;
 }
@@ -252,7 +235,7 @@ static gboolean gst_nonstream_audio_decoder_src_query(GstPad *pad, GstObject *pa
 		{
 			if (!dec->loaded)
 			{
-				res = FALSE;
+				GST_DEBUG_OBJECT(parent, "cannot respond to duration query: nothing is loaded yet");
 				break;
 			}
 
@@ -267,17 +250,31 @@ static gboolean gst_nonstream_audio_decoder_src_query(GstPad *pad, GstObject *pa
 		}
 		case GST_QUERY_POSITION:
 		{
+			GST_DEBUG_OBJECT(parent, "position query received");
+
 			if (!dec->loaded)
 			{
-				res = FALSE;
+				GST_DEBUG_OBJECT(parent, "cannot respond to position query: nothing is loaded yet");
+				break;
+			}
+
+			if (dec_class->tell == NULL)
+			{
+				GST_DEBUG_OBJECT(parent, "cannot respond to position query: subclass does not have tell() function defined");
 				break;
 			}
 
 			gst_query_parse_position(query, &format, NULL);
-			if ((format == GST_FORMAT_TIME) && (dec_class->tell != NULL))
+			if (format == GST_FORMAT_TIME)
 			{
-        			gst_query_set_position(query, format, dec_class->tell(dec));
+				GstClockTime pos = dec_class->tell(dec);
+				GST_DEBUG_OBJECT(parent, "position query received with format TIME -> reporting position %" GST_TIME_FORMAT, GST_TIME_ARGS(pos));
+        			gst_query_set_position(query, format, pos);
 				res = TRUE;
+			}
+			else
+			{
+				GST_DEBUG_OBJECT(parent, "position query received with unsupported format %s -> not reporting anything", gst_format_get_name(format));
 			}
 
 			break;
@@ -286,25 +283,37 @@ static gboolean gst_nonstream_audio_decoder_src_query(GstPad *pad, GstObject *pa
 		{
 			GstFormat fmt;
 
-			if (dec->loaded)
+			if (!dec->loaded)
 			{
-				GST_DEBUG_OBJECT(parent, "seeking query");
-				gst_query_parse_seeking(query, &fmt, NULL, NULL, NULL);
+				GST_DEBUG_OBJECT(parent, "cannot respond to position query: nothing is loaded yet");
+				break;
+			}
 
-				if (fmt == GST_FORMAT_TIME)
-				{
-					gst_query_set_seeking(query, GST_FORMAT_TIME, TRUE, dec->cur_segment.start, dec->cur_segment.stop);
-					res = TRUE;
-				}
+			if (dec_class->seek == NULL)
+			{
+				GST_DEBUG_OBJECT(parent, "cannot respond to seeking query: subclass does not have seek() function defined");
+				break;
+			}
+
+			gst_query_parse_seeking(query, &fmt, NULL, NULL, NULL);
+
+			if (fmt == GST_FORMAT_TIME)
+			{
+				GST_DEBUG_OBJECT(parent, "seeking query received with format TIME -> can seek: yes");
+				gst_query_set_seeking(query, GST_FORMAT_TIME, TRUE, dec->cur_segment.start, dec->cur_segment.stop);
+				res = TRUE;
 			}
 			else
-				GST_DEBUG_OBJECT(parent, "cannot respond to seeking query - nothing loaded yet");
+				GST_DEBUG_OBJECT(parent, "seeking query received with unsupported format %s -> can seek: no", gst_format_get_name(format));
 
 			break;
 		}
 		default:
-			return gst_pad_query_default(pad, parent, query);
+			break;
 	}
+
+	if (!res)
+		res = gst_pad_query_default(pad, parent, query);
 
 	return res;
 }
@@ -378,14 +387,9 @@ static gboolean gst_nonstream_audio_decoder_do_seek(GstNonstreamAudioDecoder *de
 	if ((stop == -1) && (dec->duration > 0))
 		stop = dec->duration;
 
-	res = TRUE;
-
 	dec_class = GST_NONSTREAM_AUDIO_DECODER_GET_CLASS(dec);
 
-	if (dec_class->seek != NULL)
-	{
-		res = dec_class->seek(dec, segment.position);
-	}
+	res = dec_class->seek(dec, segment.position);
 
 	if (res)
 	{
@@ -451,8 +455,6 @@ static gboolean gst_nonstream_audio_decoder_sinkpad_activate(GstPad *pad, G_GNUC
 static gboolean gst_nonstream_audio_decoder_sinkpad_activate_mode(GstPad *pad, GstObject *parent, GstPadMode mode, gboolean active)
 {
 	gboolean res;
-	/* TODO: is this cast necessary here? Yes, it does a type check, but still ... */
-	GstNonstreamAudioDecoder *dec = GST_NONSTREAM_AUDIO_DECODER(parent);
 
 	switch (mode)
 	{
@@ -462,7 +464,7 @@ static gboolean gst_nonstream_audio_decoder_sinkpad_activate_mode(GstPad *pad, G
 			break;
 		case GST_PAD_MODE_PULL:
 			if (active)
-				res = gst_pad_start_task(pad, (GstTaskFunction)gst_nonstream_audio_decoder_loop, dec, NULL);
+				res = gst_pad_start_task(pad, (GstTaskFunction)gst_nonstream_audio_decoder_loop, parent, NULL);
 			else
 				res = gst_pad_stop_task(pad);
 			break;
@@ -549,7 +551,7 @@ static void gst_nonstream_audio_decoder_loop(GstNonstreamAudioDecoder *dec)
 
 		GST_NONSTREAM_AUDIO_DECODER_STREAM_LOCK(dec);
 
-		if (dec_class->decode(dec, &outbuf, &num_samples, dec->cur_segment.rate))
+		if (dec_class->decode(dec, &outbuf, &num_samples))
 		{
 			if (G_UNLIKELY(
 				dec->output_format_changed ||
@@ -562,7 +564,6 @@ static void gst_nonstream_audio_decoder_loop(GstNonstreamAudioDecoder *dec)
 					GST_LOG_OBJECT(dec, "could not push output buffer: negotiation failed");
 					goto pause_unlock;
 				}
-
 			}
 
 			GST_BUFFER_DURATION(outbuf)  = gst_util_uint64_scale_int(num_samples, GST_SECOND, dec->audio_info.rate);
@@ -594,7 +595,8 @@ static void gst_nonstream_audio_decoder_loop(GstNonstreamAudioDecoder *dec)
 
 pause:
 	GST_INFO_OBJECT(dec, "pausing task");
-	gst_pad_pause_task(dec->sinkpad); /* TODO: perhaps stop instead of pause? */
+	/* NOT using stop_task here, since that would cause a deadlock */
+	gst_pad_pause_task(dec->sinkpad);
 	return;
 pause_unlock:
 	GST_NONSTREAM_AUDIO_DECODER_STREAM_UNLOCK(dec);
@@ -605,28 +607,113 @@ pause_unlock:
 static gboolean gst_nonstream_audio_decoder_negotiate_default(GstNonstreamAudioDecoder *dec)
 {
 	GstCaps *caps;
+	GstNonstreamAudioDecoderClass *dec_class;
 	gboolean res = TRUE;
+	GstQuery *query = NULL;
+	GstAllocator *allocator;
+	GstAllocationParams allocation_params;
 
 	g_return_val_if_fail(GST_IS_NONSTREAM_AUDIO_DECODER(dec), FALSE);
 	g_return_val_if_fail(GST_AUDIO_INFO_IS_VALID(&(dec->audio_info)), FALSE);
+
+	dec_class = GST_NONSTREAM_AUDIO_DECODER_CLASS(G_OBJECT_GET_CLASS(dec));
 
 	caps = gst_audio_info_to_caps(&(dec->audio_info));
 
 	GST_DEBUG_OBJECT(dec, "setting src caps %" GST_PTR_FORMAT, caps);
 
 	res = gst_pad_set_caps(dec->srcpad, caps);
-	gst_caps_unref(caps);
 
 	if (!res)
-		return FALSE;
+		goto done;
 
 	dec->output_format_changed = FALSE;
 
+	query = gst_query_new_allocation(caps, TRUE);
+	if (!gst_pad_peer_query(dec->srcpad, query))
+	{
+		GST_DEBUG_OBJECT (dec, "didn't get downstream ALLOCATION hints");
+	}
+
+	g_assert(dec_class->decide_allocation != NULL);
+	res = dec_class->decide_allocation (dec, query);
+
+	GST_DEBUG_OBJECT(dec, "ALLOCATION (%d) params: %" GST_PTR_FORMAT, res, query);
+
+	if (!res)
+		goto no_decide_allocation;
+
+	/* we got configuration from our peer or the decide_allocation method,
+	 * parse them */
+	if (gst_query_get_n_allocation_params(query) > 0)
+	{
+		gst_query_parse_nth_allocation_param(query, 0, &allocator, &allocation_params);
+	}
+	else
+	{
+		allocator = NULL;
+		gst_allocation_params_init(&allocation_params);
+	}
+
+	if (dec->allocator != NULL)
+		gst_object_unref(dec->allocator);
+	dec->allocator = allocator;
+	dec->allocation_params = allocation_params;
+
+done:
+	if (query != NULL)
+		gst_query_unref(query);
+	gst_caps_unref(caps);
+
 	return res;
+
+no_decide_allocation:
+	{
+		GST_WARNING_OBJECT(dec, "subclass failed to decide allocation");
+		goto done;
+	}
 }
 
 
-static void gst_nonstream_audio_decoder_set_property(GObject * object, guint prop_id, const GValue * value, GParamSpec * pspec)
+static gboolean gst_nonstream_audio_decoder_decide_allocation_default(G_GNUC_UNUSED GstNonstreamAudioDecoder *dec, GstQuery *query)
+{
+	GstAllocator *allocator = NULL;
+	GstAllocationParams params;
+	gboolean update_allocator;
+
+	/* we got configuration from our peer or the decide_allocation method,
+	 * parse them */
+	if (gst_query_get_n_allocation_params(query) > 0)
+	{
+		/* try the allocator */
+		gst_query_parse_nth_allocation_param(query, 0, &allocator, &params);
+		update_allocator = TRUE;
+	}
+	else
+	{
+		allocator = NULL;
+		gst_allocation_params_init(&params);
+		update_allocator = FALSE;
+	}
+
+	if (update_allocator)
+		gst_query_set_nth_allocation_param(query, 0, allocator, &params);
+	else
+		gst_query_add_allocation_param(query, allocator, &params);
+	if (allocator)
+		gst_object_unref(allocator);
+
+	return TRUE;
+}
+
+
+static gboolean gst_nonstream_audio_decoder_propose_allocation_default(G_GNUC_UNUSED GstNonstreamAudioDecoder *dec, G_GNUC_UNUSED GstQuery *query)
+{
+	return TRUE;
+}
+
+
+static void gst_nonstream_audio_decoder_set_property(GObject *object, guint prop_id, const GValue *value, GParamSpec *pspec)
 {
 	GstNonstreamAudioDecoder *dec = GST_NONSTREAM_AUDIO_DECODER(object);
 
@@ -637,19 +724,19 @@ static void gst_nonstream_audio_decoder_set_property(GObject * object, guint pro
 			guint new_subsong = g_value_get_uint(value);
 			GST_NONSTREAM_AUDIO_DECODER_STREAM_LOCK(dec);
 			if (dec->num_subsongs == 0)
-				GST_INFO_OBJECT(dec, "Ignoring request to set current subsong to %u, since num_subsongs == 0 (= subsongs not supported)", new_subsong);
+				GST_INFO_OBJECT(dec, "ignoring request to set current subsong to %u, since num_subsongs == 0 (= subsongs not supported)", new_subsong);
 			else if (new_subsong >= dec->num_subsongs)
-				GST_WARNING_OBJECT(dec, "Ignoring request to set current subsong to %u, since %u < num_subsongs (%u)", new_subsong, new_subsong, dec->num_subsongs);
+				GST_WARNING_OBJECT(dec, "ignoring request to set current subsong to %u, since %u < num_subsongs (%u)", new_subsong, new_subsong, dec->num_subsongs);
 			else
 			{
 				GstNonstreamAudioDecoderClass *klass = GST_NONSTREAM_AUDIO_DECODER_GET_CLASS(dec);
 				if (klass->set_current_subsong != NULL)
 				{
 					if (!(klass->set_current_subsong(dec, new_subsong)))
-						GST_WARNING_OBJECT(dec, "Switching to new subsong %u failed", new_subsong);
+						GST_WARNING_OBJECT(dec, "switching to new subsong %u failed", new_subsong);
 				}
 				else
-					GST_INFO_OBJECT(dec, "Cannot set current subsong - set_current_subsong is NULL");
+					GST_INFO_OBJECT(dec, "cannot set current subsong - set_current_subsong is NULL");
 			}
 			GST_NONSTREAM_AUDIO_DECODER_STREAM_UNLOCK(dec);
 			break;
@@ -661,7 +748,7 @@ static void gst_nonstream_audio_decoder_set_property(GObject * object, guint pro
 }
 
 
-static void gst_nonstream_audio_decoder_get_property(GObject * object, guint prop_id, GValue * value, GParamSpec * pspec)
+static void gst_nonstream_audio_decoder_get_property(GObject *object, guint prop_id, GValue *value, GParamSpec *pspec)
 {
 	GstNonstreamAudioDecoder *dec = GST_NONSTREAM_AUDIO_DECODER(object);
 
@@ -674,7 +761,7 @@ static void gst_nonstream_audio_decoder_get_property(GObject * object, guint pro
 			if (klass->get_current_subsong != NULL)
 				g_value_set_uint(value, klass->get_current_subsong(dec));
 			else
-				GST_INFO_OBJECT(dec, "Cannot get current subsong - get_current_subsong is NULL");
+				GST_INFO_OBJECT(dec, "cannot get current subsong - get_current_subsong is NULL");
 			GST_NONSTREAM_AUDIO_DECODER_STREAM_UNLOCK(dec);
 			break;
 		}
@@ -707,19 +794,54 @@ static void gst_nonstream_audio_decoder_finalize(GObject *object)
 
 void gst_nonstream_audio_decoder_set_duration(GstNonstreamAudioDecoder *dec, GstClockTime duration)
 {
+	g_return_if_fail(GST_IS_NONSTREAM_AUDIO_DECODER(dec));
 	dec->duration = duration;
 }
 
 
-void gst_nonstream_audio_decoder_set_subsongs(GstNonstreamAudioDecoder *dec, guint num_subsongs)
+void gst_nonstream_audio_decoder_init_subsong_properties(GstNonstreamAudioDecoderClass *klass)
 {
+	GObjectClass *object_class;
+
+	g_return_if_fail(GST_IS_NONSTREAM_AUDIO_DECODER_CLASS(klass));
+
+	object_class = G_OBJECT_CLASS(klass);
+
+	g_object_class_install_property(
+		object_class,
+		PROP_CURRENT_SUBSONG,
+		g_param_spec_uint(
+			"current-subsong",
+			"Currently active subsong",
+			"Subsong that is currently selected for playback",
+			0, G_MAXUINT,
+			DEFAULT_CURRENT_SUBSONG,
+			G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS
+		)
+	);
+	g_object_class_install_property(
+		object_class,
+		PROP_NUM_SUBSONGS,
+		g_param_spec_uint(
+			"num-subsongs",
+			"Number of available subsongs",
+			"Subsongs available for playback (0 = media does not support subsongs)",
+			0, G_MAXUINT,
+			DEFAULT_NUM_SUBSONGS,
+			G_PARAM_READABLE | G_PARAM_STATIC_STRINGS
+		)
+	);
+}
+
+
+void gst_nonstream_audio_decoder_set_num_subsongs(GstNonstreamAudioDecoder *dec, guint num_subsongs)
+{
+	g_return_if_fail(GST_IS_NONSTREAM_AUDIO_DECODER(dec));
+
 	GST_NONSTREAM_AUDIO_DECODER_STREAM_LOCK(dec);
 	dec->num_subsongs = num_subsongs;
 	GST_NONSTREAM_AUDIO_DECODER_STREAM_UNLOCK(dec);
 }
-
-
-/* TODO: convenience function to get allocator hints from downstream */
 
 
 gboolean gst_nonstream_audio_decoder_set_output_audioinfo(GstNonstreamAudioDecoder *dec, GstAudioInfo const *audio_info)
@@ -740,8 +862,6 @@ gboolean gst_nonstream_audio_decoder_set_output_audioinfo(GstNonstreamAudioDecod
 		res = FALSE;
 		goto done;
 	}
-
-	/* TODO: mutex lock */
 
 	templ_caps = gst_pad_get_pad_template_caps(dec->srcpad);
 	caps_ok = gst_caps_is_subset(caps, templ_caps);
@@ -797,6 +917,8 @@ void gst_nonstream_audio_decoder_get_downstream_format(GstNonstreamAudioDecoder 
 	guint structure_nr, num_structures;
 	gboolean ds_rate_found, ds_channels_found;
 
+	g_return_if_fail(GST_IS_NONSTREAM_AUDIO_DECODER(dec));
+
 	/* Get the caps that are allowed by downstream */
 	{
 		GstCaps *allowed_srccaps_unnorm = gst_pad_get_allowed_caps(dec->srcpad);
@@ -841,5 +963,28 @@ void gst_nonstream_audio_decoder_get_downstream_format(GstNonstreamAudioDecoder 
 		GST_DEBUG_OBJECT(dec, "downstream did not specify number of channels - using default (%d channels)", *num_channels);
 
 	
+}
+
+
+GstBuffer * gst_nonstream_audio_decoder_allocate_output_buffer(GstNonstreamAudioDecoder *dec, gsize size)
+{
+	GstBuffer *buffer = NULL;
+
+	GST_NONSTREAM_AUDIO_DECODER_STREAM_LOCK(dec);
+
+	if (G_UNLIKELY(
+		dec->output_format_changed ||
+		(GST_AUDIO_INFO_IS_VALID(&(dec->audio_info)) && gst_pad_check_reconfigure(dec->srcpad))
+	))
+	{
+		if (!gst_nonstream_audio_decoder_negotiate(dec))
+			goto done;
+	}
+
+	buffer = gst_buffer_new_allocate(dec->allocator, size, &(dec->allocation_params));
+
+done:
+	GST_NONSTREAM_AUDIO_DECODER_STREAM_UNLOCK(dec);
+	return buffer;
 }
 
