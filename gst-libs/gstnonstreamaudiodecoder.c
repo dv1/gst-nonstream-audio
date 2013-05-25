@@ -638,3 +638,55 @@ gboolean gst_nonstream_audio_decoder_negotiate(GstNonstreamAudioDecoder *dec)
 	return res;
 }
 
+
+void gst_nonstream_audio_decoder_get_downstream_format(GstNonstreamAudioDecoder *dec, gint *sample_rate, gint *num_channels)
+{
+	GstCaps *allowed_srccaps;
+	guint structure_nr, num_structures;
+	gboolean ds_rate_found, ds_channels_found;
+
+	/* Get the caps that are allowed by downstream */
+	{
+		GstCaps *allowed_srccaps_unnorm = gst_pad_get_allowed_caps(dec->srcpad);
+		allowed_srccaps = gst_caps_normalize(allowed_srccaps_unnorm);
+	}
+
+	ds_rate_found = FALSE;
+	ds_channels_found = FALSE;
+
+	/* Go through all allowed caps, see if one of them has sample rate or number of channels set (or both) */
+	num_structures = gst_caps_get_size(allowed_srccaps);
+	for (structure_nr = 0; structure_nr < num_structures; ++structure_nr)
+	{
+		GstStructure *structure;
+
+		ds_rate_found = FALSE;
+		ds_channels_found = FALSE;
+
+		structure = gst_caps_get_structure(allowed_srccaps, structure_nr);
+
+		if ((sample_rate != NULL) && gst_structure_get_int(structure, "rate", sample_rate))
+		{
+			GST_DEBUG_OBJECT(dec, "got sample rate from srccaps structure #%u/%u : %d Hz", structure_nr, num_structures, *sample_rate);
+			ds_rate_found = TRUE;
+		}
+		if ((num_channels != NULL) && gst_structure_get_int(structure, "channels", num_channels))
+		{
+			GST_DEBUG_OBJECT(dec, "got number of channels from srccaps structure #%u/%u", structure_nr, num_structures, *num_channels);
+			ds_channels_found = TRUE;
+		}
+
+		if (ds_rate_found || ds_channels_found)
+			break;
+	}
+
+	gst_caps_unref(allowed_srccaps);
+
+	if ((sample_rate != NULL) && !ds_rate_found)
+		GST_DEBUG_OBJECT(dec, "downstream did not specify sample rate - using default (%d Hz)", *sample_rate);
+	if ((num_channels != NULL) && !ds_channels_found)
+		GST_DEBUG_OBJECT(dec, "downstream did not specify number of channels - using default (%d channels)", *num_channels);
+
+	
+}
+

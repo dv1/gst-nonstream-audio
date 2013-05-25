@@ -75,6 +75,7 @@ void gst_nonstream_audio_decoder_set_duration(GstNonstreamAudioDecoder *dec, Gst
 void gst_nonstream_audio_decoder_set_subsongs(GstNonstreamAudioDecoder *dec, guint num_subsongs);
 gboolean gst_nonstream_audio_decoder_set_output_format(GstNonstreamAudioDecoder *dec, GstAudioInfo const *info);
 gboolean gst_nonstream_audio_decoder_negotiate(GstNonstreamAudioDecoder *dec);
+void gst_nonstream_audio_decoder_get_downstream_format(GstNonstreamAudioDecoder *dec, gint *sample_rate, gint *num_channels);
 
 
 G_END_DECLS

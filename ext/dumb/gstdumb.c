@@ -106,69 +106,11 @@ static GstClockTime gst_dumb_tell(GstNonstreamAudioDecoder *dec)
 
 gboolean gst_dumb_load(GstNonstreamAudioDecoder *dec, GstBuffer *source_data)
 {
-	GstCaps *allowed_srccaps;
-	guint structure_nr, num_structures;
-	gboolean ds_rate_found, ds_channels_found;
-	GstDumb *dumb;
+	GstDumb *dumb = GST_DUMB(dec);
 
-	dumb = GST_DUMB(dec);
-
-	/* TODO: move this code for evaluating downstream caps to a base class function:
-	void gst_nonstream_audio_decoder_get_downstream_format(GstNonstreamAudioDecoder *dec, gint *sample_rate, gint *num_channels);
-	*/
-
-	/* Get the caps that are allowed by downstream */
-	{
-		GstCaps *allowed_srccaps_unnorm = gst_pad_get_allowed_caps(GST_NONSTREAM_AUDIO_DECODER_SRC_PAD(dumb));
-		allowed_srccaps = gst_caps_normalize(allowed_srccaps_unnorm);
-	}
-
-	ds_rate_found = FALSE;
-	ds_channels_found = FALSE;
-
-	/* Go through all allowed caps, see if one of them has sample rate or number of channels set (or both) */
-	num_structures = gst_caps_get_size(allowed_srccaps);
-	for (structure_nr = 0; structure_nr < num_structures; ++structure_nr)
-	{
-		GstStructure *structure;
-		gint sample_rate, num_channels;
-
-		ds_rate_found = FALSE;
-		ds_channels_found = FALSE;
-
-		structure = gst_caps_get_structure(allowed_srccaps, structure_nr);
-
-		if (gst_structure_get_int(structure, "rate", &sample_rate))
-		{
-			GST_DEBUG_OBJECT(dumb, "got sample rate from srccaps structure #%u/%u : %d Hz", structure_nr, num_structures, sample_rate);
-			ds_rate_found = TRUE;
-			continue;
-		}
-		if (gst_structure_get_int(structure, "channels", &num_channels))
-		{
-			GST_DEBUG_OBJECT(dumb, "got number of channels from srccaps structure #%u/%u", structure_nr, num_structures, num_channels);
-			ds_channels_found = TRUE;
-			continue;
-		}
-
-		dumb->sample_rate = sample_rate;
-		dumb->num_channels = num_channels;
-
-		break;
-	}
-
-	gst_caps_unref(allowed_srccaps);
-
-	if (!ds_rate_found)
-	{
-		dumb->sample_rate = DEFAULT_SAMPLE_RATE;
-		GST_DEBUG_OBJECT(dumb, "downstream did not specify sample rate - using default (%d Hz)", dumb->sample_rate);
-	}
-	if (!ds_channels_found)
-	{
-		dumb->num_channels = DEFAULT_NUM_CHANNELS;
-		GST_DEBUG_OBJECT(dumb, "downstream did not specify number of channels - using default (%d channels)", dumb->num_channels);
-	}
+	dumb->sample_rate = DEFAULT_SAMPLE_RATE;
+	dumb->num_channels = DEFAULT_NUM_CHANNELS;
+	gst_nonstream_audio_decoder_get_downstream_format(dec, &(dumb->sample_rate), &(dumb->num_channels));
 
 	{
 		GstMapInfo map;
