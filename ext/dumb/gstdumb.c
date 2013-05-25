@@ -251,7 +251,7 @@ static gboolean gst_dumb_init_sigrenderer(GstDumb *dumb, GstClockTime seek_pos)
 
 static gboolean plugin_init(GstPlugin *plugin)
 {
-	if (!gst_element_register(plugin, "dumbaudioplay", GST_RANK_SECONDARY + 1, gst_dumb_get_type())) return FALSE;
+	if (!gst_element_register(plugin, "dumbaudioplay", GST_RANK_PRIMARY + 1, gst_dumb_get_type())) return FALSE;
 	return TRUE;
 }
 

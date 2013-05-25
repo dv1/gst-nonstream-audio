@@ -298,9 +298,9 @@ static gboolean gst_nonstream_audio_decoder_do_seek(GstNonstreamAudioDecoder *de
 	GstSeekFlags flags;
 	GstSeekType start_type, stop_type;
 	gint64 start, stop;
-	gboolean update;
-
-	/* TODO: what about FLUSH and DISCONT? */
+	GstSegment segment;
+	gboolean flush;
+	GstNonstreamAudioDecoderClass *dec_class;
 
 	if (!dec->loaded)
 	{
@@ -321,8 +321,19 @@ static gboolean gst_nonstream_audio_decoder_do_seek(GstNonstreamAudioDecoder *de
 		return FALSE;
 	}
 
+	flush = ((flags & GST_SEEK_FLAG_FLUSH) == GST_SEEK_FLAG_FLUSH);
+
+	if (flush)
+		gst_pad_push_event(dec->srcpad, gst_event_new_flush_start());
+	else
+		gst_pad_pause_task(dec->sinkpad);  /* not _stop_task()? */
+
+	GST_PAD_STREAM_LOCK (dec->sinkpad);
+
+	segment = dec->cur_segment;
+
 	if (!gst_segment_do_seek(
-		&(dec->cur_segment),
+		&segment,
 		rate,
 		format,
 		flags,
@@ -330,33 +341,59 @@ static gboolean gst_nonstream_audio_decoder_do_seek(GstNonstreamAudioDecoder *de
 		start,
 		stop_type,
 		stop,
-		&update
+		NULL
 	))
 	{
     		GST_DEBUG_OBJECT(dec, "could not seek in segment");
+		GST_PAD_STREAM_UNLOCK(dec->sinkpad);
 		return FALSE;
 	}
 
-	GST_NONSTREAM_AUDIO_DECODER_STREAM_LOCK(dec);
+	if ((stop == -1) && (dec->duration > 0))
+		stop = dec->duration;
 
 	res = TRUE;
 
-	if (update)
+	dec_class = GST_NONSTREAM_AUDIO_DECODER_GET_CLASS(dec);
+
+	if (dec_class->seek != NULL)
 	{
-		GstNonstreamAudioDecoderClass *dec_class = GST_NONSTREAM_AUDIO_DECODER_GET_CLASS(dec);
-
-		if (dec_class->seek != NULL)
-		{
-			res = dec_class->seek(dec, dec->cur_segment.position);
-		}
-
-		if (res)
-		{
-			dec->offset = gst_util_uint64_scale_int(dec->cur_segment.position, dec->audio_info.rate, GST_SECOND);
-		}
+		res = dec_class->seek(dec, segment.position);
 	}
 
-	GST_NONSTREAM_AUDIO_DECODER_STREAM_UNLOCK(dec);
+	if (res)
+	{
+		dec->cur_segment = segment;
+		dec->offset = gst_util_uint64_scale_int(dec->cur_segment.position, dec->audio_info.rate, GST_SECOND);
+
+		if (flags & GST_SEEK_FLAG_SEGMENT)
+		{
+			GST_DEBUG_OBJECT (dec, "posting SEGMENT_START message");
+
+			gst_element_post_message(
+				GST_ELEMENT(dec),
+				gst_message_new_segment_start(
+					GST_OBJECT(dec),
+					GST_FORMAT_TIME, segment.start
+				)
+			);
+		}
+		if (flush)
+			gst_pad_push_event(dec->srcpad, gst_event_new_flush_stop(TRUE));
+
+		gst_pad_push_event(dec->srcpad, gst_event_new_segment(&segment));
+
+		GST_WARNING_OBJECT(dec, "seek succeeded");
+
+		gst_pad_start_task(dec->sinkpad, (GstTaskFunction)gst_nonstream_audio_decoder_loop, dec, NULL);
+	}
+	else
+	{
+		GST_WARNING_OBJECT(dec, "seek failed");
+	}
+
+
+	GST_PAD_STREAM_UNLOCK(dec->sinkpad);
 
 	return res;
 }
