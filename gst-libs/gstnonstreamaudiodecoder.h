@@ -36,6 +36,7 @@ struct _GstNonstreamAudioDecoder
 
 	GstClockTime duration;
 	guint64 offset;
+	GstSegment cur_segment;
 
 	guint num_subsongs;
 
@@ -63,7 +64,7 @@ struct _GstNonstreamAudioDecoderClass
 	guint (*get_current_subsong)(GstNonstreamAudioDecoder *dec);
 	gboolean (*set_current_subsong)(GstNonstreamAudioDecoder *dec, guint subsong);
 
-	gboolean (*decode)(GstNonstreamAudioDecoder *dec, GstBuffer **buffer, guint *num_samples);
+	gboolean (*decode)(GstNonstreamAudioDecoder *dec, GstBuffer **buffer, guint *num_samples, gdouble rate);
 
 	gboolean (*negotiate)(GstNonstreamAudioDecoder *dec);
 };
@@ -73,7 +74,7 @@ GType gst_nonstream_audio_decoder_get_type(void);
 
 void gst_nonstream_audio_decoder_set_duration(GstNonstreamAudioDecoder *dec, GstClockTime duration);
 void gst_nonstream_audio_decoder_set_subsongs(GstNonstreamAudioDecoder *dec, guint num_subsongs);
-gboolean gst_nonstream_audio_decoder_set_output_format(GstNonstreamAudioDecoder *dec, GstAudioInfo const *info);
+gboolean gst_nonstream_audio_decoder_set_output_audioinfo(GstNonstreamAudioDecoder *dec, GstAudioInfo const *info);
 gboolean gst_nonstream_audio_decoder_negotiate(GstNonstreamAudioDecoder *dec);
 void gst_nonstream_audio_decoder_get_downstream_format(GstNonstreamAudioDecoder *dec, gint *sample_rate, gint *num_channels);
 

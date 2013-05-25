@@ -30,6 +30,8 @@ static GstStateChangeReturn gst_nonstream_audio_decoder_change_state(GstElement 
 static gboolean gst_nonstream_audio_decoder_src_event(GstPad *pad, GstObject *parent, GstEvent *event);
 static gboolean gst_nonstream_audio_decoder_src_query(GstPad *pad, GstObject *parent, GstQuery *query);
 
+static gboolean gst_nonstream_audio_decoder_do_seek(GstNonstreamAudioDecoder *dec, GstEvent *event);
+
 static gboolean gst_nonstream_audio_decoder_sinkpad_activate(GstPad *pad, GstObject *parent);
 static gboolean gst_nonstream_audio_decoder_sinkpad_activate_mode(GstPad *pad, GstObject *parent, GstPadMode mode, gboolean active);
 
@@ -213,7 +215,23 @@ static GstStateChangeReturn gst_nonstream_audio_decoder_change_state(GstElement 
 
 static gboolean gst_nonstream_audio_decoder_src_event(GstPad *pad, GstObject *parent, GstEvent *event)
 {
-	return gst_pad_event_default(pad, parent, event);
+	gboolean res;
+	GstNonstreamAudioDecoder *dec;
+
+	res = FALSE;
+	dec = GST_NONSTREAM_AUDIO_DECODER(parent);
+
+	switch (GST_EVENT_TYPE(event))
+	{
+		case GST_EVENT_SEEK:
+			res = gst_nonstream_audio_decoder_do_seek(dec, event);
+			break;
+		default:
+			res = gst_pad_event_default(pad, parent, event);
+			break;
+	}
+
+	return res;
 }
 
 
@@ -267,6 +285,78 @@ static gboolean gst_nonstream_audio_decoder_src_query(GstPad *pad, GstObject *pa
 		default:
 			return gst_pad_query_default(pad, parent, query);
 	}
+
+	return res;
+}
+
+
+static gboolean gst_nonstream_audio_decoder_do_seek(GstNonstreamAudioDecoder *dec, GstEvent *event)
+{
+	gboolean res;
+	gdouble rate;
+	GstFormat format;
+	GstSeekFlags flags;
+	GstSeekType start_type, stop_type;
+	gint64 start, stop;
+	gboolean update;
+
+	/* TODO: what about FLUSH and DISCONT? */
+
+	if (!dec->loaded)
+	{
+		GST_DEBUG_OBJECT(dec, "nothing loaded yet - cannot seek");
+		return FALSE;
+	}
+	if (!GST_AUDIO_INFO_IS_VALID(&(dec->audio_info)))
+	{
+		GST_DEBUG_OBJECT(dec, "no valid audioinfo present - cannot seek");
+		return FALSE;
+	}
+
+	gst_event_parse_seek(event, &rate, &format, &flags, &start_type, &start, &stop_type, &stop);
+
+	if (format != GST_FORMAT_TIME)
+	{
+		GST_DEBUG_OBJECT(dec, "seeking is only supported in TIME format");
+		return FALSE;
+	}
+
+	if (!gst_segment_do_seek(
+		&(dec->cur_segment),
+		rate,
+		format,
+		flags,
+		start_type,
+		start,
+		stop_type,
+		stop,
+		&update
+	))
+	{
+    		GST_DEBUG_OBJECT(dec, "could not seek in segment");
+		return FALSE;
+	}
+
+	GST_NONSTREAM_AUDIO_DECODER_STREAM_LOCK(dec);
+
+	res = TRUE;
+
+	if (update)
+	{
+		GstNonstreamAudioDecoderClass *dec_class = GST_NONSTREAM_AUDIO_DECODER_GET_CLASS(dec);
+
+		if (dec_class->seek != NULL)
+		{
+			res = dec_class->seek(dec, dec->cur_segment.position);
+		}
+
+		if (res)
+		{
+			dec->offset = gst_util_uint64_scale_int(dec->cur_segment.position, dec->audio_info.rate, GST_SECOND);
+		}
+	}
+
+	GST_NONSTREAM_AUDIO_DECODER_STREAM_UNLOCK(dec);
 
 	return res;
 }
@@ -376,12 +466,10 @@ static void gst_nonstream_audio_decoder_loop(GstNonstreamAudioDecoder *dec)
 
 		dec->loaded = TRUE;
 
-		{
-			GstSegment seg;
-			gst_segment_init(&seg, GST_FORMAT_TIME);
-			seg.stop = dec->duration;
-			gst_pad_push_event(dec->srcpad, gst_event_new_segment(&seg));
-		}
+		gst_segment_init(&(dec->cur_segment), GST_FORMAT_TIME);
+		dec->cur_segment.stop = dec->duration;
+		dec->cur_segment.duration = dec->duration;
+		gst_pad_push_event(dec->srcpad, gst_event_new_segment(&(dec->cur_segment)));
 	}
 
 	/* loading is done at this point -> send samples downstream */
@@ -394,7 +482,7 @@ static void gst_nonstream_audio_decoder_loop(GstNonstreamAudioDecoder *dec)
 
 		GST_NONSTREAM_AUDIO_DECODER_STREAM_LOCK(dec);
 
-		if (dec_class->decode(dec, &outbuf, &num_samples))
+		if (dec_class->decode(dec, &outbuf, &num_samples, dec->cur_segment.rate))
 		{
 			if (G_UNLIKELY(
 				dec->output_format_changed ||
@@ -420,7 +508,7 @@ static void gst_nonstream_audio_decoder_loop(GstNonstreamAudioDecoder *dec)
 
 			if (flow != GST_FLOW_OK)
 			{
-				gst_buffer_unref(outbuf);
+				/* no need to unref buffer - gst_pad_push() does it in all cases (success and failure) */
 				GST_LOG_OBJECT(dec, "flow error when pushing output buffer: %s", gst_flow_get_name(flow));
 				goto pause_unlock;
 			}
@@ -449,14 +537,11 @@ pause_unlock:
 
 static gboolean gst_nonstream_audio_decoder_negotiate_default(GstNonstreamAudioDecoder *dec)
 {
-	GstNonstreamAudioDecoderClass *klass;
 	GstCaps *caps;
 	gboolean res = TRUE;
 
 	g_return_val_if_fail(GST_IS_NONSTREAM_AUDIO_DECODER(dec), FALSE);
 	g_return_val_if_fail(GST_AUDIO_INFO_IS_VALID(&(dec->audio_info)), FALSE);
-
-	klass = GST_NONSTREAM_AUDIO_DECODER_GET_CLASS(dec);
 
 	caps = gst_audio_info_to_caps(&(dec->audio_info));
 
@@ -570,7 +655,7 @@ void gst_nonstream_audio_decoder_set_subsongs(GstNonstreamAudioDecoder *dec, gui
 /* TODO: convenience function to get allocator hints from downstream */
 
 
-gboolean gst_nonstream_audio_decoder_set_output_format(GstNonstreamAudioDecoder *dec, GstAudioInfo const *audio_info)
+gboolean gst_nonstream_audio_decoder_set_output_audioinfo(GstNonstreamAudioDecoder *dec, GstAudioInfo const *audio_info)
 {
 	GstCaps *caps;
 	GstCaps *templ_caps;
@@ -656,6 +741,7 @@ void gst_nonstream_audio_decoder_get_downstream_format(GstNonstreamAudioDecoder 
 
 	/* Go through all allowed caps, see if one of them has sample rate or number of channels set (or both) */
 	num_structures = gst_caps_get_size(allowed_srccaps);
+	GST_DEBUG_OBJECT(dec, "%u structure(s) in downstream caps", num_structures);
 	for (structure_nr = 0; structure_nr < num_structures; ++structure_nr)
 	{
 		GstStructure *structure;
@@ -667,12 +753,12 @@ void gst_nonstream_audio_decoder_get_downstream_format(GstNonstreamAudioDecoder 
 
 		if ((sample_rate != NULL) && gst_structure_get_int(structure, "rate", sample_rate))
 		{
-			GST_DEBUG_OBJECT(dec, "got sample rate from srccaps structure #%u/%u : %d Hz", structure_nr, num_structures, *sample_rate);
+			GST_DEBUG_OBJECT(dec, "got sample rate from structure #%u : %d Hz", structure_nr, *sample_rate);
 			ds_rate_found = TRUE;
 		}
 		if ((num_channels != NULL) && gst_structure_get_int(structure, "channels", num_channels))
 		{
-			GST_DEBUG_OBJECT(dec, "got number of channels from srccaps structure #%u/%u", structure_nr, num_structures, *num_channels);
+			GST_DEBUG_OBJECT(dec, "got number of channels from structure #%u : %u channels", structure_nr, *num_channels);
 			ds_channels_found = TRUE;
 		}
 

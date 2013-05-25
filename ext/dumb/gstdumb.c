@@ -51,9 +51,11 @@ G_DEFINE_TYPE(GstDumb, gst_dumb, GST_TYPE_NONSTREAM_AUDIO_DECODER)
 static gboolean gst_dumb_seek(GstNonstreamAudioDecoder *dec, GstClockTime new_position);
 static GstClockTime gst_dumb_tell(GstNonstreamAudioDecoder *dec);
 
-gboolean gst_dumb_load(GstNonstreamAudioDecoder *dec, GstBuffer *source_data);
+static gboolean gst_dumb_load(GstNonstreamAudioDecoder *dec, GstBuffer *source_data);
 
-gboolean gst_dumb_decode(GstNonstreamAudioDecoder *dec, GstBuffer **buffer, guint *num_samples);
+static gboolean gst_dumb_decode(GstNonstreamAudioDecoder *dec, GstBuffer **buffer, guint *num_samples, gdouble rate);
+
+static gboolean gst_dumb_init_sigrenderer(GstDumb *dumb, GstClockTime seek_pos);
 
 
 
@@ -94,17 +96,32 @@ void gst_dumb_init(GstDumb *dumb)
 
 static gboolean gst_dumb_seek(GstNonstreamAudioDecoder *dec, GstClockTime new_position)
 {
+	if (!gst_dumb_init_sigrenderer(GST_DUMB(dec), new_position))
+	{
+		GST_ELEMENT_ERROR(dec, STREAM, DECODE, (NULL), ("cannot reinitialize DUMB decoding"));
+		return FALSE;
+	}
+
 	return TRUE;
 }
 
 
 static GstClockTime gst_dumb_tell(GstNonstreamAudioDecoder *dec)
 {
-	return 0;
+	GstClockTime pos;
+	GstDumb *dumb = GST_DUMB(dec);
+
+	if (dumb->duh_sigrenderer == NULL)
+		return 0;
+
+	pos = duh_sigrenderer_get_position(dumb->duh_sigrenderer);
+	pos = pos * GST_SECOND / 65536;
+
+	return pos;
 }
 
 
-gboolean gst_dumb_load(GstNonstreamAudioDecoder *dec, GstBuffer *source_data)
+static gboolean gst_dumb_load(GstNonstreamAudioDecoder *dec, GstBuffer *source_data)
 {
 	GstDumb *dumb = GST_DUMB(dec);
 
@@ -131,21 +148,10 @@ gboolean gst_dumb_load(GstNonstreamAudioDecoder *dec, GstBuffer *source_data)
 		}
 	}
 
-	if (dumb->duh_sigrenderer != NULL)
-		duh_end_sigrenderer(dumb->duh_sigrenderer);
-	dumb->duh_sigrenderer = duh_start_sigrenderer(dumb->duh, 0, dumb->num_channels, 0/*position*/);
-
-	if (dumb->duh_sigrenderer == NULL)
+	if (!gst_dumb_init_sigrenderer(dumb, 0))
 	{
 		GST_ELEMENT_ERROR(dumb, STREAM, DECODE, (NULL), ("cannot initialize DUMB decoding"));
 		return FALSE;
-	}
-
-	{
-		DUMB_IT_SIGRENDERER *itsr = duh_get_it_sigrenderer(dumb->duh_sigrenderer);
-		dumb_it_set_loop_callback(itsr, &dumb_it_callback_terminate, NULL);
-		dumb_it_set_xm_speed_zero_callback(itsr, &dumb_it_callback_terminate, NULL);
-		dumb_it_set_global_volume_zero_callback(itsr, &dumb_it_callback_terminate, NULL);
 	}
 
 	/* Set output format */
@@ -162,17 +168,31 @@ gboolean gst_dumb_load(GstNonstreamAudioDecoder *dec, GstBuffer *source_data)
 			NULL
 		);
 
-		if (!gst_nonstream_audio_decoder_set_output_format(dec, &audio_info))
+		if (!gst_nonstream_audio_decoder_set_output_audioinfo(dec, &audio_info))
 			return FALSE;
 	}
 
 	gst_nonstream_audio_decoder_set_duration(dec, duh_get_length(dumb->duh) * GST_SECOND / 65536);
 
+	{
+		char const *title;
+		GstTagList *tags;
+
+		tags = gst_tag_list_new_empty();
+
+		title = duh_get_tag(dumb->duh, "TITLE");
+		if (title != NULL)
+			gst_tag_list_add(tags, GST_TAG_MERGE_APPEND, GST_TAG_TITLE, title, NULL);
+
+		gst_pad_push_event(GST_NONSTREAM_AUDIO_DECODER_SRC_PAD(dumb), gst_event_new_tag(tags));
+	}
+
+
 	return TRUE;
 }
 
 
-gboolean gst_dumb_decode(GstNonstreamAudioDecoder *dec, GstBuffer **buffer, guint *num_samples)
+static gboolean gst_dumb_decode(GstNonstreamAudioDecoder *dec, GstBuffer **buffer, guint *num_samples, gdouble rate)
 {
 	GstDumb *dumb;
 	GstBuffer *outbuf;
@@ -186,7 +206,7 @@ gboolean gst_dumb_decode(GstNonstreamAudioDecoder *dec, GstBuffer **buffer, guin
 
 	outbuf = gst_buffer_new_allocate(NULL, num_bytes_per_outbuf, NULL);
 	gst_buffer_map(outbuf, &map, GST_MAP_WRITE);
-	actual_num_samples_read = duh_render(dumb->duh_sigrenderer, RENDER_BIT_DEPTH, 0, 1.0f, 65536.0f / dumb->sample_rate, num_samples_per_outbuf, map.data);
+	actual_num_samples_read = duh_render(dumb->duh_sigrenderer, RENDER_BIT_DEPTH, 0, 1.0f, 65536.0f / dumb->sample_rate * rate, num_samples_per_outbuf, map.data);
 	gst_buffer_unmap(outbuf, &map);
 
 	if (actual_num_samples_read == 0)
@@ -201,6 +221,28 @@ gboolean gst_dumb_decode(GstNonstreamAudioDecoder *dec, GstBuffer **buffer, guin
 		*num_samples = actual_num_samples_read;
 		return TRUE;
 	}
+}
+
+
+static gboolean gst_dumb_init_sigrenderer(GstDumb *dumb, GstClockTime seek_pos)
+{
+	g_return_val_if_fail(dumb->duh != NULL, FALSE);
+
+	if (dumb->duh_sigrenderer != NULL)
+		duh_end_sigrenderer(dumb->duh_sigrenderer);
+	dumb->duh_sigrenderer = duh_start_sigrenderer(dumb->duh, 0, dumb->num_channels, seek_pos * 65536 / GST_SECOND);
+
+	if (dumb->duh_sigrenderer == NULL)
+		return FALSE;
+
+	{
+		DUMB_IT_SIGRENDERER *itsr = duh_get_it_sigrenderer(dumb->duh_sigrenderer);
+		dumb_it_set_loop_callback(itsr, &dumb_it_callback_terminate, NULL);
+		dumb_it_set_xm_speed_zero_callback(itsr, &dumb_it_callback_terminate, NULL);
+		dumb_it_set_global_volume_zero_callback(itsr, &dumb_it_callback_terminate, NULL);
+	}
+
+	return TRUE;
 }
 
 
