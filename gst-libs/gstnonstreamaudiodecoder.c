@@ -26,7 +26,7 @@ static void gst_nonstream_audio_decoder_init(GstNonstreamAudioDecoder *dec, GstN
 static GstStateChangeReturn gst_nonstream_audio_decoder_change_state(GstElement *element, GstStateChange transition);
 
 
-/*static gboolean gst_nonstream_audio_decoder_sink_event(GstPad *pad, GstObject *parent, GstEvent *event);*/
+static gboolean gst_nonstream_audio_decoder_sink_event(GstPad *pad, GstObject *parent, GstEvent *event);
 static gboolean gst_nonstream_audio_decoder_src_event(GstPad *pad, GstObject *parent, GstEvent *event);
 static gboolean gst_nonstream_audio_decoder_src_query(GstPad *pad, GstObject *parent, GstQuery *query);
 
@@ -166,6 +166,7 @@ static void gst_nonstream_audio_decoder_init(GstNonstreamAudioDecoder *dec, GstN
 	pad_template = gst_element_class_get_pad_template(GST_ELEMENT_CLASS(klass), "sink");
 	g_return_if_fail(pad_template != NULL);
 	dec->sinkpad = gst_pad_new_from_template(pad_template, "sink");
+	gst_pad_set_event_function(dec->sinkpad, GST_DEBUG_FUNCPTR(gst_nonstream_audio_decoder_sink_event));
 	gst_pad_set_activate_function(dec->sinkpad, GST_DEBUG_FUNCPTR(gst_nonstream_audio_decoder_sinkpad_activate));
 	gst_pad_set_activatemode_function(dec->sinkpad, GST_DEBUG_FUNCPTR(gst_nonstream_audio_decoder_sinkpad_activate_mode));
 	gst_element_add_pad(GST_ELEMENT(dec), dec->sinkpad);
@@ -202,15 +203,14 @@ static GstStateChangeReturn gst_nonstream_audio_decoder_change_state(GstElement 
 }
 
 
-/*static gboolean gst_nonstream_audio_decoder_sink_event(GstPad *pad, GstObject *parent, GstEvent *event)
+static gboolean gst_nonstream_audio_decoder_sink_event(GstPad *pad, GstObject *parent, GstEvent *event)
 {
 	switch(GST_EVENT_TYPE (event))
 	{
-		case 
 		default:
 			return gst_pad_event_default(pad, parent, event);
 	}
-}*/
+}
 
 
 static gboolean gst_nonstream_audio_decoder_src_event(GstPad *pad, GstObject *parent, GstEvent *event)
@@ -282,6 +282,26 @@ static gboolean gst_nonstream_audio_decoder_src_query(GstPad *pad, GstObject *pa
 
 			break;
 		}
+		case GST_QUERY_SEEKING:
+		{
+			GstFormat fmt;
+
+			if (dec->loaded)
+			{
+				GST_DEBUG_OBJECT(parent, "seeking query");
+				gst_query_parse_seeking(query, &fmt, NULL, NULL, NULL);
+
+				if (fmt == GST_FORMAT_TIME)
+				{
+					gst_query_set_seeking(query, GST_FORMAT_TIME, TRUE, dec->cur_segment.start, dec->cur_segment.stop);
+					res = TRUE;
+				}
+			}
+			else
+				GST_DEBUG_OBJECT(parent, "cannot respond to seeking query - nothing loaded yet");
+
+			break;
+		}
 		default:
 			return gst_pad_query_default(pad, parent, query);
 	}
@@ -313,6 +333,8 @@ static gboolean gst_nonstream_audio_decoder_do_seek(GstNonstreamAudioDecoder *de
 		return FALSE;
 	}
 
+	GST_DEBUG_OBJECT(dec, "starting seek");
+
 	gst_event_parse_seek(event, &rate, &format, &flags, &start_type, &start, &stop_type, &stop);
 
 	if (format != GST_FORMAT_TIME)
@@ -324,9 +346,13 @@ static gboolean gst_nonstream_audio_decoder_do_seek(GstNonstreamAudioDecoder *de
 	flush = ((flags & GST_SEEK_FLAG_FLUSH) == GST_SEEK_FLAG_FLUSH);
 
 	if (flush)
+	{
 		gst_pad_push_event(dec->srcpad, gst_event_new_flush_start());
+	        /* unlock upstream pull_range */
+	        gst_pad_push_event(dec->sinkpad, gst_event_new_flush_start());
+	}
 	else
-		gst_pad_pause_task(dec->sinkpad);  /* not _stop_task()? */
+		gst_pad_pause_task(dec->sinkpad);
 
 	GST_PAD_STREAM_LOCK (dec->sinkpad);
 
@@ -379,7 +405,10 @@ static gboolean gst_nonstream_audio_decoder_do_seek(GstNonstreamAudioDecoder *de
 			);
 		}
 		if (flush)
+		{
 			gst_pad_push_event(dec->srcpad, gst_event_new_flush_stop(TRUE));
+			gst_pad_push_event(dec->sinkpad, gst_event_new_flush_stop(TRUE));
+		}
 
 		gst_pad_push_event(dec->srcpad, gst_event_new_segment(&segment));
 
@@ -394,6 +423,7 @@ static gboolean gst_nonstream_audio_decoder_do_seek(GstNonstreamAudioDecoder *de
 
 
 	GST_PAD_STREAM_UNLOCK(dec->sinkpad);
+	gst_event_unref(event);
 
 	return res;
 }
