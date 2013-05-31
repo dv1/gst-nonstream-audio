@@ -62,6 +62,19 @@ TODO:
 
 
 
+static char const * get_seek_type_name(GstSeekType seek_type)
+{
+	switch (seek_type)
+	{
+		case GST_SEEK_TYPE_NONE: return "none";
+		case GST_SEEK_TYPE_SET: return "set";
+		case GST_SEEK_TYPE_END: return "end";
+		default: return "<unknown>";
+	}
+}
+
+
+
 GType gst_nonstream_audio_decoder_get_type(void)
 {
 	static volatile gsize nonstream_audio_decoder_type = 0;
@@ -346,6 +359,17 @@ static gboolean gst_nonstream_audio_decoder_do_seek(GstNonstreamAudioDecoder *de
 
 	gst_event_parse_seek(event, &rate, &format, &flags, &start_type, &start, &stop_type, &stop);
 
+	GST_DEBUG_OBJECT(
+		dec,
+		"seek event data:  "
+		"rate %f  format %s  "
+		"start type %s  start %" GST_TIME_FORMAT "  "
+		"stop type %s  stop %" GST_TIME_FORMAT,
+		rate, gst_format_get_name(format),
+		get_seek_type_name(start_type), GST_TIME_ARGS(start),
+		get_seek_type_name(stop_type), GST_TIME_ARGS(stop)
+	);
+
 	if (format != GST_FORMAT_TIME)
 	{
 		GST_DEBUG_OBJECT(dec, "seeking is only supported in TIME format");
@@ -387,6 +411,30 @@ static gboolean gst_nonstream_audio_decoder_do_seek(GstNonstreamAudioDecoder *de
 	if ((stop == -1) && (dec->duration > 0))
 		stop = dec->duration;
 
+	GST_DEBUG_OBJECT(
+		dec,
+		"segment data: "
+		"seek event data:  "
+		"rate %f  applied rate %f  "
+		"format %s  "
+		"base %" GST_TIME_FORMAT "  "
+		"offset %" GST_TIME_FORMAT "  "
+		"start %" GST_TIME_FORMAT "  "
+		"stop %" GST_TIME_FORMAT "  "
+		"time %" GST_TIME_FORMAT "  "
+		"position %" GST_TIME_FORMAT "  "
+		"duration %" GST_TIME_FORMAT,
+		segment.rate, segment.applied_rate,
+		gst_format_get_name(segment.format),
+		GST_TIME_ARGS(segment.base),
+		GST_TIME_ARGS(segment.offset),
+		GST_TIME_ARGS(segment.start),
+		GST_TIME_ARGS(segment.stop),
+		GST_TIME_ARGS(segment.time),
+		GST_TIME_ARGS(segment.position),
+		GST_TIME_ARGS(segment.duration)
+	);
+
 	dec_class = GST_NONSTREAM_AUDIO_DECODER_GET_CLASS(dec);
 
 	res = dec_class->seek(dec, segment.position);
@@ -416,7 +464,7 @@ static gboolean gst_nonstream_audio_decoder_do_seek(GstNonstreamAudioDecoder *de
 
 		gst_pad_push_event(dec->srcpad, gst_event_new_segment(&segment));
 
-		GST_WARNING_OBJECT(dec, "seek succeeded");
+		GST_INFO_OBJECT(dec, "seek succeeded");
 
 		gst_pad_start_task(dec->sinkpad, (GstTaskFunction)gst_nonstream_audio_decoder_loop, dec, NULL);
 	}
