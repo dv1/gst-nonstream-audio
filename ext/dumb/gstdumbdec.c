@@ -72,10 +72,10 @@ void gst_dumb_dec_class_init(GstDumbDecClass *klass)
 	gst_element_class_add_pad_template(element_class, gst_static_pad_template_get(&sink_template));
 	gst_element_class_add_pad_template(element_class, gst_static_pad_template_get(&src_template));
 
-	dec_class->seek = gst_dumb_dec_seek;
-	dec_class->tell = gst_dumb_dec_tell;
-	dec_class->load = gst_dumb_dec_load;
-	dec_class->decode = gst_dumb_dec_decode;
+	dec_class->seek = GST_DEBUG_FUNCPTR(gst_dumb_dec_seek);
+	dec_class->tell = GST_DEBUG_FUNCPTR(gst_dumb_dec_tell);
+	dec_class->load = GST_DEBUG_FUNCPTR(gst_dumb_dec_load);
+	dec_class->decode = GST_DEBUG_FUNCPTR(gst_dumb_dec_decode);
 
 	gst_element_class_set_static_metadata(
 		element_class,
