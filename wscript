@@ -68,6 +68,18 @@ def configure(conf):
 
 	add_compiler_flags(conf, conf.env, compiler_flags, 'C', 'CC')
 
+	sse_test_fragment = """
+	  #include <xmmintrin.h>
+	  __m128 testfunc(float *a, float *b) { return _mm_add_ps(_mm_loadu_ps(a), _mm_loadu_ps(b)); }
+
+	  int main() {
+	    float a = 1.0f, b = 2.0f;
+	    testfunc(&a, &b);
+	    return 0;
+	  }
+	"""
+	if conf.check(fragment = sse_test_fragment, execute = 0, define_ret = 0, msg = 'Checking for SSE support', okmsg = 'yes', errmsg = 'no', mandatory = 0):
+		conf.env['DEFINES_SSE'] = ['_USE_SSE']
 
 	conf.env['DEFINES_ALLOCA'] = ['HAVE_ALLOCA_H']
 
@@ -100,7 +112,7 @@ def build(bld):
 	bld(
 		features = ['c', 'cshlib'],
 		includes = ['.', 'gst-libs', 'ext/dumb', 'ext/dumb/dumb-kode54-git/dumb/include'],
-		uselib = 'GSTREAMER GSTREAMER_BASE GSTREAMER_AUDIO ALLOCA',
+		uselib = 'GSTREAMER GSTREAMER_BASE GSTREAMER_AUDIO SSE ALLOCA',
 		use = 'gstnonstreamaudio',
 		target = 'gstdumb',
 		source = dumb_source,
