@@ -7,7 +7,11 @@
 #include "gstdumbdec.h"
 
 
-/* TODO: looping is still glitchy; perhaps use the "open-ended" looping mode? */
+/*
+TODO: looping is still glitchy; perhaps use the "open-ended" looping mode?
+This will continue once the requests about looping sent to Kode54 are answered. If the answer is "no",
+the decoder will be changed to use open-ended mode.
+*/
 
 
 GST_DEBUG_CATEGORY_STATIC(dumbdec_debug);
@@ -56,6 +60,7 @@ static GstClockTime gst_dumb_dec_tell(GstNonstreamAudioDecoder *dec);
 static gboolean gst_dumb_dec_load(GstNonstreamAudioDecoder *dec, GstBuffer *source_data);
 
 static gboolean gst_dumb_dec_set_num_loops(GstNonstreamAudioDecoder *dec, gint num_loops);
+static gint gst_dumb_dec_get_num_loops(GstNonstreamAudioDecoder *dec);
 
 static gboolean gst_dumb_dec_decode(GstNonstreamAudioDecoder *dec, GstBuffer **buffer, guint *num_samples);
 
@@ -85,6 +90,7 @@ void gst_dumb_dec_class_init(GstDumbDecClass *klass)
 	dec_class->tell = GST_DEBUG_FUNCPTR(gst_dumb_dec_tell);
 	dec_class->load = GST_DEBUG_FUNCPTR(gst_dumb_dec_load);
 	dec_class->set_num_loops = GST_DEBUG_FUNCPTR(gst_dumb_dec_set_num_loops);
+	dec_class->get_num_loops = GST_DEBUG_FUNCPTR(gst_dumb_dec_get_num_loops);
 	dec_class->decode = GST_DEBUG_FUNCPTR(gst_dumb_dec_decode);
 
 	gst_nonstream_audio_decoder_init_loop_properties(dec_class, FALSE);
@@ -106,10 +112,6 @@ void gst_dumb_dec_init(GstDumbDec *dumb_dec)
 	dumb_dec->loop_end_reached = FALSE;
 	dumb_dec->duh = NULL;
 	dumb_dec->duh_sigrenderer = NULL;
-
-	/* TODO: remove these lines */
-	GST_NONSTREAM_AUDIO_DECODER(dumb_dec)->num_loops = 2;
-	dumb_dec->num_loops = 2;
 }
 
 
@@ -227,6 +229,16 @@ static gboolean gst_dumb_dec_set_num_loops(GstNonstreamAudioDecoder *dec, gint n
 	dumb_dec->num_loops = num_loops;
 
 	return TRUE;
+}
+
+
+static gint gst_dumb_dec_get_num_loops(GstNonstreamAudioDecoder *dec)
+{
+	GstDumbDec *dumb_dec;
+
+	dumb_dec = GST_DUMB_DEC(dec);
+
+	return dumb_dec->num_loops;
 }
 
 

@@ -155,7 +155,6 @@ static void gst_nonstream_audio_decoder_init(GstNonstreamAudioDecoder *dec, GstN
 	dec->offset = 0;
 	dec->num_decoded = 0;
 	dec->num_subsongs = DEFAULT_NUM_SUBSONGS;
-	dec->num_loops = DEFAULT_NUM_LOOPS;
 	dec->loaded = FALSE;
 	dec->allocator = NULL;
 
@@ -1001,7 +1000,7 @@ void gst_nonstream_audio_decoder_set_loop_property(GObject *object, guint prop_i
 			}
 
 			GST_NONSTREAM_AUDIO_DECODER_STREAM_LOCK(dec);
-			if (new_num_loops != dec->num_loops)
+			if (new_num_loops != klass->get_num_loops(dec))
 			{
 				if (klass->set_num_loops != NULL)
 				{
@@ -1012,8 +1011,6 @@ void gst_nonstream_audio_decoder_set_loop_property(GObject *object, guint prop_i
 						else
 							GST_WARNING_OBJECT(dec, "setting number of loops to %u failed", new_num_loops);
 					}
-					else
-						dec->num_loops = new_num_loops;
 				}
 				else
 					GST_INFO_OBJECT(dec, "cannot set number of loops - set_num_loops is NULL");
@@ -1031,13 +1028,14 @@ void gst_nonstream_audio_decoder_set_loop_property(GObject *object, guint prop_i
 void gst_nonstream_audio_decoder_get_loop_property(GObject *object, guint prop_id, GValue *value, GParamSpec *pspec)
 {
  	GstNonstreamAudioDecoder *dec = GST_NONSTREAM_AUDIO_DECODER(object);
+	GstNonstreamAudioDecoderClass *klass = GST_NONSTREAM_AUDIO_DECODER_GET_CLASS(dec);
 
 	switch (prop_id)
 	{
 		case PROP_NUM_LOOPS:
 		{
 			GST_NONSTREAM_AUDIO_DECODER_STREAM_LOCK(dec);
-			g_value_set_int(value, dec->num_loops);
+			g_value_set_int(value, klass->get_num_loops(dec));
 			GST_NONSTREAM_AUDIO_DECODER_STREAM_UNLOCK(dec);
 			break;
 		}

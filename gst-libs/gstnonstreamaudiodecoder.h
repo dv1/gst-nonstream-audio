@@ -39,7 +39,6 @@ struct _GstNonstreamAudioDecoder
 	GstSegment cur_segment;
 
 	guint num_subsongs;
-	gint num_loops; /* TODO: this does not have to be here; use get_num_loops() instead */
 
 	gboolean loaded;
 
@@ -71,7 +70,7 @@ struct _GstNonstreamAudioDecoderClass
 	gboolean (*set_current_subsong)(GstNonstreamAudioDecoder *dec, guint subsong);
 
 	gboolean (*set_num_loops)(GstNonstreamAudioDecoder *dec, gint num_loops);
-	/*gint (*get_num_loops)(GstNonstreamAudioDecoder *dec);*/ /* TODO */
+	gint (*get_num_loops)(GstNonstreamAudioDecoder *dec);
 
 	gboolean (*decode)(GstNonstreamAudioDecoder *dec, GstBuffer **buffer, guint *num_samples);
 
