@@ -25,6 +25,8 @@ struct _GstDumbDec
 	GstNonstreamAudioDecoder parent;
 
 	gint sample_rate, num_channels;
+	gint cur_loop_count, num_loops;
+	gboolean loop_end_reached;
 	DUH *duh;
 	DUH_SIGRENDERER *duh_sigrenderer;
 };

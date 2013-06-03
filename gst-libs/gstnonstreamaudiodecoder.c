@@ -13,11 +13,14 @@ enum
 {
 	PROP_0,
 	PROP_CURRENT_SUBSONG,
-	PROP_NUM_SUBSONGS
+	PROP_NUM_SUBSONGS,
+	PROP_NUM_LOOPS
 };
 
 #define DEFAULT_CURRENT_SUBSONG 0
 #define DEFAULT_NUM_SUBSONGS 0
+#define DEFAULT_NUM_LOOPS 0
+#define DEFAULT_LOOPS_INFINITE_ONLY FALSE
 
 
 static void gst_nonstream_audio_decoder_class_init(GstNonstreamAudioDecoderClass *klass);
@@ -58,6 +61,8 @@ TODO:
 - study GstAudioDecoder code more
 - what about negative playback rates ?
 - loops
+- support "open-ended" looping playback (= loops without moving current position back to start of loop -> segment is open-ended)
+- seek() and tell() should be optional (some decoders can only tell(), some cannot do even that)
 */
 
 
@@ -128,6 +133,8 @@ static void gst_nonstream_audio_decoder_class_init(GstNonstreamAudioDecoderClass
 	object_class->set_property = GST_DEBUG_FUNCPTR(gst_nonstream_audio_decoder_set_property);
 	object_class->get_property = GST_DEBUG_FUNCPTR(gst_nonstream_audio_decoder_get_property);
 
+	dec_class->loops_infinite_only = FALSE;
+
 	dec_class->seek = NULL;
 	dec_class->tell = NULL;
 	dec_class->load = NULL;
@@ -146,7 +153,9 @@ static void gst_nonstream_audio_decoder_init(GstNonstreamAudioDecoder *dec, GstN
 
 	dec->duration = GST_CLOCK_TIME_NONE;
 	dec->offset = 0;
+	dec->num_decoded = 0;
 	dec->num_subsongs = DEFAULT_NUM_SUBSONGS;
+	dec->num_loops = DEFAULT_NUM_LOOPS;
 	dec->loaded = FALSE;
 	dec->allocator = NULL;
 
@@ -387,7 +396,7 @@ static gboolean gst_nonstream_audio_decoder_do_seek(GstNonstreamAudioDecoder *de
 	else
 		gst_pad_pause_task(dec->sinkpad);
 
-	GST_PAD_STREAM_LOCK (dec->sinkpad);
+	GST_PAD_STREAM_LOCK(dec->sinkpad);
 
 	segment = dec->cur_segment;
 
@@ -443,6 +452,7 @@ static gboolean gst_nonstream_audio_decoder_do_seek(GstNonstreamAudioDecoder *de
 	{
 		dec->cur_segment = segment;
 		dec->offset = gst_util_uint64_scale_int(dec->cur_segment.position, dec->audio_info.rate, GST_SECOND);
+		dec->num_decoded = 0;
 
 		if (flags & GST_SEEK_FLAG_SEGMENT)
 		{
@@ -542,6 +552,7 @@ static gboolean gst_nonstream_audio_decoder_get_upstream_size(GstNonstreamAudioD
 }
 
 
+/* NOTE: not to be confused with song loops - this function is the looping srcpad task */
 static void gst_nonstream_audio_decoder_loop(GstNonstreamAudioDecoder *dec)
 {
 	GstNonstreamAudioDecoderClass *dec_class;
@@ -619,6 +630,7 @@ static void gst_nonstream_audio_decoder_loop(GstNonstreamAudioDecoder *dec)
 			GST_BUFFER_TIMESTAMP(outbuf) = gst_util_uint64_scale_int(dec->offset, GST_SECOND, dec->audio_info.rate);
 
 			dec->offset += num_samples;
+			dec->num_decoded += num_samples;
 
 			flow = gst_pad_push(dec->srcpad, outbuf);
 
@@ -911,6 +923,128 @@ void gst_nonstream_audio_decoder_set_num_subsongs(GstNonstreamAudioDecoder *dec,
 	GST_NONSTREAM_AUDIO_DECODER_STREAM_LOCK(dec);
 	dec->num_subsongs = num_subsongs;
 	GST_NONSTREAM_AUDIO_DECODER_STREAM_UNLOCK(dec);
+}
+
+
+void gst_nonstream_audio_decoder_init_loop_properties(GstNonstreamAudioDecoderClass *klass, gboolean infinite_only)
+{
+	GObjectClass *object_class;
+	GParamSpec * param_spec;
+
+	g_return_if_fail(GST_IS_NONSTREAM_AUDIO_DECODER_CLASS(klass));
+
+	object_class = G_OBJECT_CLASS(klass);
+
+	if (infinite_only)
+	{
+		param_spec = g_param_spec_boolean(
+			"loop",
+			"Infinite loop",
+			"Enables infinitely looping playback",
+			DEFAULT_LOOPS_INFINITE_ONLY,
+			G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS
+		);
+	}
+	else
+	{
+		param_spec = g_param_spec_int(
+			"num-loops",
+			"Number of playback loops",
+			"Number of times a playback loop shall be executed (0 = no looping; -1 = infinite loop)",
+			-1, G_MAXINT,
+			DEFAULT_NUM_LOOPS,
+			G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS
+		);
+	}
+	g_object_class_install_property(object_class, PROP_NUM_LOOPS, param_spec);
+}
+
+
+void gst_nonstream_audio_decoder_handle_loop(GstNonstreamAudioDecoder *dec, GstClockTime new_position)
+{
+	GstNonstreamAudioDecoderClass *klass = GST_NONSTREAM_AUDIO_DECODER_GET_CLASS(dec);
+
+	g_return_if_fail(GST_IS_NONSTREAM_AUDIO_DECODER_CLASS(klass));
+
+	GST_NONSTREAM_AUDIO_DECODER_STREAM_LOCK(dec);
+	/* TODO: num_decoded or offset? */
+	dec->cur_segment.base += gst_util_uint64_scale_int(dec->num_decoded, GST_SECOND, dec->audio_info.rate);
+	dec->cur_segment.start = new_position;
+	dec->cur_segment.time = new_position;
+	dec->num_decoded = 0;
+	dec->offset = gst_util_uint64_scale_int(new_position, dec->audio_info.rate, GST_SECOND);
+	gst_pad_push_event(dec->srcpad, gst_event_new_segment(&(dec->cur_segment)));	
+	GST_NONSTREAM_AUDIO_DECODER_STREAM_UNLOCK(dec);
+}
+
+
+void gst_nonstream_audio_decoder_set_loop_property(GObject *object, guint prop_id, const GValue *value, GParamSpec *pspec)
+{
+ 	GstNonstreamAudioDecoder *dec = GST_NONSTREAM_AUDIO_DECODER(object);
+	GstNonstreamAudioDecoderClass *klass = GST_NONSTREAM_AUDIO_DECODER_GET_CLASS(dec);
+
+	switch (prop_id)
+	{
+		case PROP_NUM_LOOPS:
+		{
+			gboolean loop;
+			gint new_num_loops;
+			if (klass->loops_infinite_only)
+			{
+				loop = g_value_get_boolean(value);
+				new_num_loops = loop ? -1 : 0;
+			}
+			else
+			{
+				loop = FALSE;
+				new_num_loops = g_value_get_int(value);
+			}
+
+			GST_NONSTREAM_AUDIO_DECODER_STREAM_LOCK(dec);
+			if (new_num_loops != dec->num_loops)
+			{
+				if (klass->set_num_loops != NULL)
+				{
+					if (!(klass->set_num_loops(dec, new_num_loops)))
+					{
+						if (klass->loops_infinite_only)
+							GST_WARNING_OBJECT(dec, "%s infinite loops failed", loop ? "enabling" : "disabling");
+						else
+							GST_WARNING_OBJECT(dec, "setting number of loops to %u failed", new_num_loops);
+					}
+					else
+						dec->num_loops = new_num_loops;
+				}
+				else
+					GST_INFO_OBJECT(dec, "cannot set number of loops - set_num_loops is NULL");
+			}
+			GST_NONSTREAM_AUDIO_DECODER_STREAM_UNLOCK(dec);
+			break;
+		}
+		default:
+			G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
+			break;
+	}
+}
+
+
+void gst_nonstream_audio_decoder_get_loop_property(GObject *object, guint prop_id, GValue *value, GParamSpec *pspec)
+{
+ 	GstNonstreamAudioDecoder *dec = GST_NONSTREAM_AUDIO_DECODER(object);
+
+	switch (prop_id)
+	{
+		case PROP_NUM_LOOPS:
+		{
+			GST_NONSTREAM_AUDIO_DECODER_STREAM_LOCK(dec);
+			g_value_set_int(value, dec->num_loops);
+			GST_NONSTREAM_AUDIO_DECODER_STREAM_UNLOCK(dec);
+			break;
+		}
+		default:
+			G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
+			break;
+	}
 }
 
 
