@@ -761,34 +761,10 @@ static gboolean gst_nonstream_audio_decoder_propose_allocation_default(G_GNUC_UN
 }
 
 
-static void gst_nonstream_audio_decoder_set_property(GObject *object, guint prop_id, const GValue *value, GParamSpec *pspec)
+static void gst_nonstream_audio_decoder_set_property(GObject *object, guint prop_id, G_GNUC_UNUSED const GValue *value, GParamSpec *pspec)
 {
-	GstNonstreamAudioDecoder *dec = GST_NONSTREAM_AUDIO_DECODER(object);
-
 	switch (prop_id)
 	{
-		case PROP_CURRENT_SUBSONG:
-		{
-			guint new_subsong = g_value_get_uint(value);
-			GST_NONSTREAM_AUDIO_DECODER_STREAM_LOCK(dec);
-			if (dec->num_subsongs == 0)
-				GST_INFO_OBJECT(dec, "ignoring request to set current subsong to %u, since num_subsongs == 0 (= subsongs not supported)", new_subsong);
-			else if (new_subsong >= dec->num_subsongs)
-				GST_WARNING_OBJECT(dec, "ignoring request to set current subsong to %u, since %u < num_subsongs (%u)", new_subsong, new_subsong, dec->num_subsongs);
-			else
-			{
-				GstNonstreamAudioDecoderClass *klass = GST_NONSTREAM_AUDIO_DECODER_GET_CLASS(dec);
-				if (klass->set_current_subsong != NULL)
-				{
-					if (!(klass->set_current_subsong(dec, new_subsong)))
-						GST_WARNING_OBJECT(dec, "switching to new subsong %u failed", new_subsong);
-				}
-				else
-					GST_INFO_OBJECT(dec, "cannot set current subsong - set_current_subsong is NULL");
-			}
-			GST_NONSTREAM_AUDIO_DECODER_STREAM_UNLOCK(dec);
-			break;
-		}
 		default:
 			G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
 			break;
@@ -796,30 +772,10 @@ static void gst_nonstream_audio_decoder_set_property(GObject *object, guint prop
 }
 
 
-static void gst_nonstream_audio_decoder_get_property(GObject *object, guint prop_id, GValue *value, GParamSpec *pspec)
+static void gst_nonstream_audio_decoder_get_property(GObject *object, guint prop_id, G_GNUC_UNUSED GValue *value, GParamSpec *pspec)
 {
-	GstNonstreamAudioDecoder *dec = GST_NONSTREAM_AUDIO_DECODER(object);
-
 	switch (prop_id)
 	{
-		case PROP_CURRENT_SUBSONG:
-		{
-			GstNonstreamAudioDecoderClass *klass = GST_NONSTREAM_AUDIO_DECODER_GET_CLASS(dec);
-			GST_NONSTREAM_AUDIO_DECODER_STREAM_LOCK(dec);
-			if (klass->get_current_subsong != NULL)
-				g_value_set_uint(value, klass->get_current_subsong(dec));
-			else
-				GST_INFO_OBJECT(dec, "cannot get current subsong - get_current_subsong is NULL");
-			GST_NONSTREAM_AUDIO_DECODER_STREAM_UNLOCK(dec);
-			break;
-		}
-		case PROP_NUM_SUBSONGS:
-		{
-			GST_NONSTREAM_AUDIO_DECODER_STREAM_LOCK(dec);
-			g_value_set_uint(value, dec->num_subsongs);
-			GST_NONSTREAM_AUDIO_DECODER_STREAM_UNLOCK(dec);
-			break;
-		}
 		default:
 			G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
 			break;
@@ -879,6 +835,72 @@ void gst_nonstream_audio_decoder_init_subsong_properties(GstNonstreamAudioDecode
 			G_PARAM_READABLE | G_PARAM_STATIC_STRINGS
 		)
 	);
+}
+
+
+void gst_nonstream_audio_decoder_set_subsong_property(GObject *object, guint prop_id, const GValue *value, GParamSpec *pspec)
+{
+	GstNonstreamAudioDecoder *dec = GST_NONSTREAM_AUDIO_DECODER(object);
+
+	switch (prop_id)
+	{
+		case PROP_CURRENT_SUBSONG:
+		{
+			guint new_subsong = g_value_get_uint(value);
+			GST_NONSTREAM_AUDIO_DECODER_STREAM_LOCK(dec);
+			if (dec->num_subsongs == 0)
+				GST_INFO_OBJECT(dec, "ignoring request to set current subsong to %u, since num_subsongs == 0 (= subsongs not supported)", new_subsong);
+			else if (new_subsong >= dec->num_subsongs)
+				GST_WARNING_OBJECT(dec, "ignoring request to set current subsong to %u, since %u < num_subsongs (%u)", new_subsong, new_subsong, dec->num_subsongs);
+			else
+			{
+				GstNonstreamAudioDecoderClass *klass = GST_NONSTREAM_AUDIO_DECODER_GET_CLASS(dec);
+				if (klass->set_current_subsong != NULL)
+				{
+					if (!(klass->set_current_subsong(dec, new_subsong)))
+						GST_WARNING_OBJECT(dec, "switching to new subsong %u failed", new_subsong);
+				}
+				else
+					GST_INFO_OBJECT(dec, "cannot set current subsong - set_current_subsong is NULL");
+			}
+			GST_NONSTREAM_AUDIO_DECODER_STREAM_UNLOCK(dec);
+			break;
+		}
+		default:
+			G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
+			break;
+	}
+}
+
+
+void gst_nonstream_audio_decoder_get_subsong_property(GObject *object, guint prop_id, GValue *value, GParamSpec *pspec)
+{
+	GstNonstreamAudioDecoder *dec = GST_NONSTREAM_AUDIO_DECODER(object);
+
+	switch (prop_id)
+	{
+		case PROP_CURRENT_SUBSONG:
+		{
+			GstNonstreamAudioDecoderClass *klass = GST_NONSTREAM_AUDIO_DECODER_GET_CLASS(dec);
+			GST_NONSTREAM_AUDIO_DECODER_STREAM_LOCK(dec);
+			if (klass->get_current_subsong != NULL)
+				g_value_set_uint(value, klass->get_current_subsong(dec));
+			else
+				GST_INFO_OBJECT(dec, "cannot get current subsong - get_current_subsong is NULL");
+			GST_NONSTREAM_AUDIO_DECODER_STREAM_UNLOCK(dec);
+			break;
+		}
+		case PROP_NUM_SUBSONGS:
+		{
+			GST_NONSTREAM_AUDIO_DECODER_STREAM_LOCK(dec);
+			g_value_set_uint(value, dec->num_subsongs);
+			GST_NONSTREAM_AUDIO_DECODER_STREAM_UNLOCK(dec);
+			break;
+		}
+		default:
+			G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
+			break;
+	}
 }
 
 
