@@ -14,6 +14,9 @@ the decoder will be changed to use open-ended mode.
 */
 
 
+/*#define USE_OPEN_END_MODE*/
+
+
 GST_DEBUG_CATEGORY_STATIC(dumbdec_debug);
 #define GST_CAT_DEFAULT dumbdec_debug
 
@@ -93,7 +96,13 @@ void gst_dumb_dec_class_init(GstDumbDecClass *klass)
 	dec_class->get_num_loops = GST_DEBUG_FUNCPTR(gst_dumb_dec_get_num_loops);
 	dec_class->decode = GST_DEBUG_FUNCPTR(gst_dumb_dec_decode);
 
-	gst_nonstream_audio_decoder_init_loop_properties(dec_class, FALSE);
+	gst_nonstream_audio_decoder_init_loop_properties(dec_class, FALSE,
+#ifdef USE_OPEN_END_MODE
+		TRUE
+#else
+		FALSE
+#endif
+	);
 
 	gst_element_class_set_static_metadata(
 		element_class,
@@ -135,7 +144,11 @@ static GstClockTime gst_dumb_dec_tell(GstNonstreamAudioDecoder *dec)
 	if (dumb_dec->duh_sigrenderer == NULL)
 		return 0;
 
-	pos = duh_sigrenderer_get_position(dumb_dec->duh_sigrenderer) % duh_get_length(dumb_dec->duh);
+	pos = duh_sigrenderer_get_position(dumb_dec->duh_sigrenderer)
+#ifndef USE_OPEN_END_MODE
+	% duh_get_length(dumb_dec->duh)
+#endif
+		;
 	GST_DEBUG_OBJECT(dec, "pos: %u len: %u", pos, duh_get_length(dumb_dec->duh));
 	pos = pos * GST_SECOND / 65536;
 
@@ -254,10 +267,13 @@ static gboolean gst_dumb_dec_decode(GstNonstreamAudioDecoder *dec, GstBuffer **b
 	if (dumb_dec->loop_end_reached)
 	{
 		dumb_dec->loop_end_reached = FALSE;
+#ifndef USE_OPEN_END_MODE
 		gst_nonstream_audio_decoder_handle_loop(dec, gst_dumb_dec_tell(dec));
+#endif
 	}
 
 	num_samples_per_outbuf = 1024;
+#ifndef USE_OPEN_END_MODE
 	{
 		long len = duh_get_length(dumb_dec->duh);
 		long pos = duh_sigrenderer_get_position(dumb_dec->duh_sigrenderer) % len;
@@ -268,6 +284,7 @@ static gboolean gst_dumb_dec_decode(GstNonstreamAudioDecoder *dec, GstBuffer **b
 			num_samples_per_outbuf = diff;
 		}
 	}
+#endif
 	num_bytes_per_outbuf = num_samples_per_outbuf * dumb_dec->num_channels * RENDER_BIT_DEPTH / 8;
 
 	outbuf = gst_nonstream_audio_decoder_allocate_output_buffer(dec, num_bytes_per_outbuf);
@@ -297,10 +314,10 @@ static int gst_dumb_dec_loop_callback(void *ptr)
 {
 	gboolean continue_loop;
 	GstDumbDec *dumb_dec;
-	//GstNonstreamAudioDecoder *dec;
+	GstNonstreamAudioDecoder *dec;
 
 	dumb_dec = (GstDumbDec*)(ptr);
-	//dec = GST_NONSTREAM_AUDIO_DECODER(dumb_dec);
+	dec = GST_NONSTREAM_AUDIO_DECODER(dumb_dec);
 
 	GST_DEBUG_OBJECT(dumb_dec, "DUMB reached loop callback");
 
@@ -322,7 +339,6 @@ static int gst_dumb_dec_loop_callback(void *ptr)
 	if (continue_loop)
 	{
 		dumb_dec->loop_end_reached = TRUE;
-		//gst_nonstream_audio_decoder_handle_loop(dec, 0);
 	}
 
 	return continue_loop ? 0 : 1;

@@ -60,9 +60,6 @@ TODO:
 - offset vs. tell()
 - study GstAudioDecoder code more
 - what about negative playback rates ?
-- loops
-- support "open-ended" looping playback (= loops without moving current position back to start of loop -> segment is open-ended)
-- seek() and tell() should be optional (some decoders can only tell(), some cannot do even that)
 */
 
 
@@ -594,8 +591,8 @@ static void gst_nonstream_audio_decoder_loop(GstNonstreamAudioDecoder *dec)
 		dec->loaded = TRUE;
 
 		gst_segment_init(&(dec->cur_segment), GST_FORMAT_TIME);
-		dec->cur_segment.stop = dec->duration;
-		dec->cur_segment.duration = dec->duration;
+		dec->cur_segment.stop = dec_class->open_ended ? ((GstClockTime)(-1)) : dec->duration;
+		dec->cur_segment.duration = dec_class->open_ended ? ((GstClockTime)(-1)) : dec->duration;
 		gst_pad_push_event(dec->srcpad, gst_event_new_segment(&(dec->cur_segment)));
 	}
 
@@ -925,7 +922,7 @@ void gst_nonstream_audio_decoder_set_num_subsongs(GstNonstreamAudioDecoder *dec,
 }
 
 
-void gst_nonstream_audio_decoder_init_loop_properties(GstNonstreamAudioDecoderClass *klass, gboolean infinite_only)
+void gst_nonstream_audio_decoder_init_loop_properties(GstNonstreamAudioDecoderClass *klass, gboolean infinite_only, gboolean open_ended)
 {
 	GObjectClass *object_class;
 	GParamSpec * param_spec;
@@ -933,6 +930,8 @@ void gst_nonstream_audio_decoder_init_loop_properties(GstNonstreamAudioDecoderCl
 	g_return_if_fail(GST_IS_NONSTREAM_AUDIO_DECODER_CLASS(klass));
 
 	object_class = G_OBJECT_CLASS(klass);
+
+	klass->open_ended = open_ended;
 
 	if (infinite_only)
 	{
@@ -961,7 +960,15 @@ void gst_nonstream_audio_decoder_init_loop_properties(GstNonstreamAudioDecoderCl
 
 void gst_nonstream_audio_decoder_handle_loop(GstNonstreamAudioDecoder *dec, GstClockTime new_position)
 {
+	/* NOTE: handle_loop must be called AFTER the last samples of the loop have been decoded and pushed downstream */
+
 	GstNonstreamAudioDecoderClass *klass = GST_NONSTREAM_AUDIO_DECODER_GET_CLASS(dec);
+	if (klass->open_ended)
+	{
+		/* handle_loop makes no sense with open-ended decoders */
+		GST_WARNING_OBJECT(dec, "ignoring handle_loop() call, since the decoder is open-ended");
+		return;
+	}
 
 	g_return_if_fail(GST_IS_NONSTREAM_AUDIO_DECODER_CLASS(klass));
 

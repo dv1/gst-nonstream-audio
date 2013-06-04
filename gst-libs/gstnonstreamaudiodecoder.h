@@ -56,7 +56,7 @@ struct _GstNonstreamAudioDecoderClass
 {
 	GstElementClass element_class;
 
-	gboolean loops_infinite_only;
+	gboolean loops_infinite_only, open_ended;
 
 	/*< public >*/
 	/* virtual methods for subclasses */
@@ -90,7 +90,7 @@ void gst_nonstream_audio_decoder_set_subsong_property(GObject *object, guint pro
 void gst_nonstream_audio_decoder_get_subsong_property(GObject *object, guint prop_id, GValue *value, GParamSpec *pspec);
 void gst_nonstream_audio_decoder_set_num_subsongs(GstNonstreamAudioDecoder *dec, guint num_subsongs);
 
-void gst_nonstream_audio_decoder_init_loop_properties(GstNonstreamAudioDecoderClass *klass, gboolean infinite_only);
+void gst_nonstream_audio_decoder_init_loop_properties(GstNonstreamAudioDecoderClass *klass, gboolean infinite_only, gboolean open_ended);
 void gst_nonstream_audio_decoder_handle_loop(GstNonstreamAudioDecoder *dec, GstClockTime new_position);
 void gst_nonstream_audio_decoder_set_loop_property(GObject *object, guint prop_id, const GValue *value, GParamSpec *pspec);
 void gst_nonstream_audio_decoder_get_loop_property(GObject *object, guint prop_id, GValue *value, GParamSpec *pspec);
