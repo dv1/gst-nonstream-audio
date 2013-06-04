@@ -608,6 +608,8 @@ static void gst_nonstream_audio_decoder_loop(GstNonstreamAudioDecoder *dec)
 
 		if (dec_class->decode(dec, &outbuf, &num_samples))
 		{
+			g_assert(outbuf != NULL);
+
 			if (G_UNLIKELY(
 				dec->output_format_changed ||
 				(GST_AUDIO_INFO_IS_VALID(&(dec->audio_info)) && gst_pad_check_reconfigure(dec->srcpad))
@@ -639,7 +641,7 @@ static void gst_nonstream_audio_decoder_loop(GstNonstreamAudioDecoder *dec)
 		}
 		else
 		{
-			GST_INFO_OBJECT(dec, "decode() returned NULL buffer -> sending EOS event");
+			GST_INFO_OBJECT(dec, "decode() reports end -> sending EOS event");
 			gst_pad_push_event(dec->srcpad, gst_event_new_eos());
 			goto pause;
 		}

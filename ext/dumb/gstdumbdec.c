@@ -144,11 +144,7 @@ static GstClockTime gst_dumb_dec_tell(GstNonstreamAudioDecoder *dec)
 	if (dumb_dec->duh_sigrenderer == NULL)
 		return 0;
 
-	pos = duh_sigrenderer_get_position(dumb_dec->duh_sigrenderer)
-#ifndef USE_OPEN_END_MODE
-	% duh_get_length(dumb_dec->duh)
-#endif
-		;
+	pos = duh_sigrenderer_get_position(dumb_dec->duh_sigrenderer);
 	GST_DEBUG_OBJECT(dec, "pos: %u len: %u", pos, duh_get_length(dumb_dec->duh));
 	pos = pos * GST_SECOND / 65536;
 
@@ -273,18 +269,6 @@ static gboolean gst_dumb_dec_decode(GstNonstreamAudioDecoder *dec, GstBuffer **b
 	}
 
 	num_samples_per_outbuf = 1024;
-#ifndef USE_OPEN_END_MODE
-	{
-		long len = duh_get_length(dumb_dec->duh);
-		long pos = duh_sigrenderer_get_position(dumb_dec->duh_sigrenderer) % len;
-		long diff = len - pos;
-		if (diff < num_samples_per_outbuf)
-		{
-			GST_DEBUG_OBJECT(dumb_dec, "Truncated end length found: %d", diff);
-			num_samples_per_outbuf = diff;
-		}
-	}
-#endif
 	num_bytes_per_outbuf = num_samples_per_outbuf * dumb_dec->num_channels * RENDER_BIT_DEPTH / 8;
 
 	outbuf = gst_nonstream_audio_decoder_allocate_output_buffer(dec, num_bytes_per_outbuf);
@@ -293,6 +277,11 @@ static gboolean gst_dumb_dec_decode(GstNonstreamAudioDecoder *dec, GstBuffer **b
 
 	gst_buffer_map(outbuf, &map, GST_MAP_WRITE);
 	actual_num_samples_read = duh_render(dumb_dec->duh_sigrenderer, RENDER_BIT_DEPTH, 0, 1.0f, 65536.0f / dumb_dec->sample_rate, num_samples_per_outbuf, map.data);
+	if (actual_num_samples_read == 0)
+	{
+		GST_DEBUG_OBJECT(dumb_dec, "duh_render returned 0 samples - retrying");
+		actual_num_samples_read = duh_render(dumb_dec->duh_sigrenderer, RENDER_BIT_DEPTH, 0, 1.0f, 65536.0f / dumb_dec->sample_rate, num_samples_per_outbuf, map.data);
+	}
 	gst_buffer_unmap(outbuf, &map);
 
 	if (actual_num_samples_read == 0)

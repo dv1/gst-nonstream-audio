@@ -82,6 +82,8 @@ def configure(conf):
 		conf.env['DEFINES_SSE'] = ['_USE_SSE']
 
 	conf.env['DEFINES_ALLOCA'] = ['HAVE_ALLOCA_H']
+	if conf.options.enable_debug:
+		conf.env['DEFINES_ALLOCA'] += ['DEBUGMODE']
 
 
 	# test for GStreamer libraries
