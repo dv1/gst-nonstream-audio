@@ -974,6 +974,8 @@ void gst_nonstream_audio_decoder_handle_loop(GstNonstreamAudioDecoder *dec, GstC
 
 	g_return_if_fail(GST_IS_NONSTREAM_AUDIO_DECODER_CLASS(klass));
 
+	GST_DEBUG_OBJECT(dec, "handle_loop() invoked with new_position = %" GST_TIME_FORMAT, GST_TIME_ARGS(new_position));
+
 	GST_NONSTREAM_AUDIO_DECODER_STREAM_LOCK(dec);
 	/* TODO: num_decoded or offset? */
 	dec->cur_segment.base += gst_util_uint64_scale_int(dec->num_decoded, GST_SECOND, dec->audio_info.rate);
