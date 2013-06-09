@@ -94,7 +94,7 @@ GType gst_nonstream_audio_decoder_get_type(void)
 			sizeof(GstNonstreamAudioDecoder),
 			0,
 			(GInstanceInitFunc)gst_nonstream_audio_decoder_init,
-			NULL /* TODO: correct? */
+			NULL
 		};
 
 		type_ = g_type_register_static(
@@ -532,18 +532,7 @@ static gboolean gst_nonstream_audio_decoder_sinkpad_activate_mode(GstPad *pad, G
 
 static gboolean gst_nonstream_audio_decoder_get_upstream_size(GstNonstreamAudioDecoder *dec, gint64 *length)
 {
-	GstPad *peer;
-	gboolean res = FALSE;
-
-	peer = gst_pad_get_peer(dec->sinkpad);
-	if (peer == NULL)
-		return FALSE;
-
-	res = (gst_pad_query_duration(peer, GST_FORMAT_BYTES, length) && ((*length) >= 0));
-
-	gst_object_unref(peer);
-
-	return res;
+	return gst_pad_peer_query_duration(dec->sinkpad, GST_FORMAT_BYTES, length) && (*length >= 0);
 }
 
 
@@ -901,9 +890,7 @@ void gst_nonstream_audio_decoder_get_subsong_property(GObject *object, guint pro
 		}
 		case PROP_NUM_SUBSONGS:
 		{
-			GST_NONSTREAM_AUDIO_DECODER_STREAM_LOCK(dec);
 			g_value_set_uint(value, dec->num_subsongs);
-			GST_NONSTREAM_AUDIO_DECODER_STREAM_UNLOCK(dec);
 			break;
 		}
 		default:
@@ -916,10 +903,7 @@ void gst_nonstream_audio_decoder_get_subsong_property(GObject *object, guint pro
 void gst_nonstream_audio_decoder_set_num_subsongs(GstNonstreamAudioDecoder *dec, guint num_subsongs)
 {
 	g_return_if_fail(GST_IS_NONSTREAM_AUDIO_DECODER(dec));
-
-	GST_NONSTREAM_AUDIO_DECODER_STREAM_LOCK(dec);
 	dec->num_subsongs = num_subsongs;
-	GST_NONSTREAM_AUDIO_DECODER_STREAM_UNLOCK(dec);
 }
 
 
