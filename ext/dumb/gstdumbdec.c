@@ -7,14 +7,6 @@
 #include "gstdumbdec.h"
 
 
-/*
-TODO: looping is still glitchy; perhaps use the "open-ended" looping mode?
-This will continue once the requests about looping sent to Kode54 are answered. If the answer is "no",
-the decoder will be changed to use open-ended mode.
-*/
-
-
-/*#define USE_OPEN_END_MODE*/
 
 
 GST_DEBUG_CATEGORY_STATIC(dumbdec_debug);
@@ -96,12 +88,7 @@ void gst_dumb_dec_class_init(GstDumbDecClass *klass)
 	dec_class->get_num_loops = GST_DEBUG_FUNCPTR(gst_dumb_dec_get_num_loops);
 	dec_class->decode = GST_DEBUG_FUNCPTR(gst_dumb_dec_decode);
 
-	gst_nonstream_audio_decoder_init_loop_properties(dec_class, FALSE,
-#ifdef USE_OPEN_END_MODE
-		TRUE
-#else
-		FALSE
-#endif
+	gst_nonstream_audio_decoder_init_loop_properties(dec_class, FALSE, FALSE);
 	);
 
 	gst_element_class_set_static_metadata(
@@ -146,7 +133,7 @@ static GstClockTime gst_dumb_dec_tell(GstNonstreamAudioDecoder *dec)
 
 	pos = duh_sigrenderer_get_position(dumb_dec->duh_sigrenderer);
 	GST_DEBUG_OBJECT(dec, "pos: %u len: %u", pos, duh_get_length(dumb_dec->duh));
-	pos = pos * GST_SECOND / 65536;
+	pos = gst_util_uint64_scale_int(pos, GST_SECOND, 65536);
 
 	return pos;
 }
@@ -202,8 +189,8 @@ static gboolean gst_dumb_dec_load(GstNonstreamAudioDecoder *dec, GstBuffer *sour
 		if (!gst_nonstream_audio_decoder_set_output_audioinfo(dec, &audio_info))
 			return FALSE;
 	}
-
-	gst_nonstream_audio_decoder_set_duration(dec, duh_get_length(dumb_dec->duh) * GST_SECOND / 65536);
+	
+	gst_nonstream_audio_decoder_set_duration(dec, gst_util_uint64_scale_int(duh_get_length(dumb_dec->duh), GST_SECOND, 65536));
 
 	{
 		char const *title, *message;
@@ -263,9 +250,7 @@ static gboolean gst_dumb_dec_decode(GstNonstreamAudioDecoder *dec, GstBuffer **b
 	if (dumb_dec->loop_end_reached)
 	{
 		dumb_dec->loop_end_reached = FALSE;
-#ifndef USE_OPEN_END_MODE
 		gst_nonstream_audio_decoder_handle_loop(dec, gst_dumb_dec_tell(dec));
-#endif
 	}
 
 	num_samples_per_outbuf = 1024;
@@ -277,11 +262,6 @@ static gboolean gst_dumb_dec_decode(GstNonstreamAudioDecoder *dec, GstBuffer **b
 
 	gst_buffer_map(outbuf, &map, GST_MAP_WRITE);
 	actual_num_samples_read = duh_render(dumb_dec->duh_sigrenderer, RENDER_BIT_DEPTH, 0, 1.0f, 65536.0f / dumb_dec->sample_rate, num_samples_per_outbuf, map.data);
-	if (actual_num_samples_read == 0)
-	{
-		GST_DEBUG_OBJECT(dumb_dec, "duh_render returned 0 samples - retrying");
-		actual_num_samples_read = duh_render(dumb_dec->duh_sigrenderer, RENDER_BIT_DEPTH, 0, 1.0f, 65536.0f / dumb_dec->sample_rate, num_samples_per_outbuf, map.data);
-	}
 	gst_buffer_unmap(outbuf, &map);
 
 	if (actual_num_samples_read == 0)
@@ -330,6 +310,8 @@ static int gst_dumb_dec_loop_callback(void *ptr)
 		dumb_dec->loop_end_reached = TRUE;
 	}
 
+	GST_DEBUG_OBJECT(dec, "position reported by DUMB: %u loopcount: %u", duh_sigrenderer_get_position(dumb_dec->duh_sigrenderer), dumb_dec->cur_loop_count);
+
 	return continue_loop ? 0 : 1;
 }
 
@@ -340,7 +322,12 @@ static gboolean gst_dumb_dec_init_sigrenderer(GstDumbDec *dumb_dec, GstClockTime
 
 	if (dumb_dec->duh_sigrenderer != NULL)
 		duh_end_sigrenderer(dumb_dec->duh_sigrenderer);
-	dumb_dec->duh_sigrenderer = duh_start_sigrenderer(dumb_dec->duh, 0, dumb_dec->num_channels, seek_pos * 65536 / GST_SECOND);
+	dumb_dec->duh_sigrenderer = duh_start_sigrenderer(
+		dumb_dec->duh,
+		0,
+		dumb_dec->num_channels,
+		gst_util_uint64_scale_int(seek_pos, 65536, GST_SECOND)
+	);
 
 	if (dumb_dec->duh_sigrenderer == NULL)
 		return FALSE;
