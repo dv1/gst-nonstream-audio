@@ -1229,9 +1229,9 @@ void gst_nonstream_audio_decoder_get_downstream_format(GstNonstreamAudioDecoder 
 	gst_caps_unref(allowed_srccaps);
 
 	if ((sample_rate != NULL) && !ds_rate_found)
-		GST_DEBUG_OBJECT(dec, "downstream did not specify sample rate - using default (%d Hz)", *sample_rate);
+		GST_INFO_OBJECT(dec, "downstream did not specify sample rate - using default (%d Hz)", *sample_rate);
 	if ((num_channels != NULL) && !ds_channels_found)
-		GST_DEBUG_OBJECT(dec, "downstream did not specify number of channels - using default (%d channels)", *num_channels);
+		GST_INFO_OBJECT(dec, "downstream did not specify number of channels - using default (%d channels)", *num_channels);
 
 	
 }
