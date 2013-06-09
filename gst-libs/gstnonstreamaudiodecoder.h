@@ -2,6 +2,7 @@
 #define GSTNONSTREAMAUDIODEC_H
 
 #include <gst/gst.h>
+#include <gst/base/gstadapter.h>
 #include <gst/audio/audio.h>
 
 
@@ -47,6 +48,9 @@ struct _GstNonstreamAudioDecoder
 
 	GstAllocator *allocator;
 	GstAllocationParams allocation_params;
+
+	GstAdapter *adapter;
+	gint64 upstream_size; /* used in push mode only */
 
 	GRecMutex stream_lock;
 };
