@@ -27,6 +27,7 @@ struct _GstDumbDec
 	gint sample_rate, num_channels;
 	gint cur_loop_count, num_loops;
 	gboolean loop_end_reached;
+	gint resampling_quality, ramp_style;
 	DUH *duh;
 	DUH_SIGRENDERER *duh_sigrenderer;
 };

@@ -7,12 +7,34 @@
 #include "gstdumbdec.h"
 
 
+/* TODO: subsongs */
 
 
 GST_DEBUG_CATEGORY_STATIC(dumbdec_debug);
 #define GST_CAT_DEFAULT dumbdec_debug
 
 
+enum
+{
+	PROP_0,
+	PROP_RESAMPLING_QUALITY,
+	PROP_RAMP_STYLE
+};
+
+
+
+/* ramp styles (taken from foo_dumb mod.cpp) */
+#define DUMB_RAMP_STYLE_NONE 0
+#define DUMB_RAMP_STYLE_LOGARITHMIC 1
+#define DUMB_RAMP_STYLE_LINEAR 2
+#define DUMB_RAMP_STYLE_XM_LIN_ELSE_NONE 3
+#define DUMB_RAMP_STYLE_XM_LIN_ELSE_LOG 4
+
+/* property defaults */
+#define DEFAULT_RESAMPLING_QUALITY DUMB_RQ_CUBIC
+#define DEFAULT_RAMP_STYLE DUMB_RAMP_STYLE_NONE
+
+/* caps negotiation defaults */
 #define DEFAULT_SAMPLE_RATE 48000
 #define DEFAULT_NUM_CHANNELS 2
 
@@ -49,6 +71,15 @@ G_DEFINE_TYPE(GstDumbDec, gst_dumb_dec, GST_TYPE_NONSTREAM_AUDIO_DECODER)
 
 
 
+static GType gst_dumb_dec_resampling_quality_get_type(void);
+#define GST_TYPE_DUMB_DEC_RESAMPLING_QUALITY (gst_dumb_dec_resampling_quality_get_type())
+
+static GType gst_dumb_dec_ramp_style_get_type(void);
+#define GST_TYPE_DUMB_DEC_RAMP_STYLE (gst_dumb_dec_ramp_style_get_type())
+
+static void gst_dumb_dec_set_property(GObject *object, guint prop_id, const GValue *value, GParamSpec *pspec);
+static void gst_dumb_dec_get_property(GObject *object, guint prop_id, GValue *value, GParamSpec *pspec);
+
 static gboolean gst_dumb_dec_seek(GstNonstreamAudioDecoder *dec, GstClockTime new_position);
 static GstClockTime gst_dumb_dec_tell(GstNonstreamAudioDecoder *dec);
 
@@ -78,8 +109,8 @@ void gst_dumb_dec_class_init(GstDumbDecClass *klass)
 	gst_element_class_add_pad_template(element_class, gst_static_pad_template_get(&sink_template));
 	gst_element_class_add_pad_template(element_class, gst_static_pad_template_get(&src_template));
 
-	object_class->set_property = GST_DEBUG_FUNCPTR(gst_nonstream_audio_decoder_set_loop_property);
-	object_class->get_property = GST_DEBUG_FUNCPTR(gst_nonstream_audio_decoder_get_loop_property);
+	object_class->set_property = GST_DEBUG_FUNCPTR(gst_dumb_dec_set_property);
+	object_class->get_property = GST_DEBUG_FUNCPTR(gst_dumb_dec_get_property);
 
 	dec_class->seek = GST_DEBUG_FUNCPTR(gst_dumb_dec_seek);
 	dec_class->tell = GST_DEBUG_FUNCPTR(gst_dumb_dec_tell);
@@ -89,6 +120,30 @@ void gst_dumb_dec_class_init(GstDumbDecClass *klass)
 	dec_class->decode = GST_DEBUG_FUNCPTR(gst_dumb_dec_decode);
 
 	gst_nonstream_audio_decoder_init_loop_properties(dec_class, FALSE, FALSE);
+
+	g_object_class_install_property(
+		object_class,
+		PROP_RESAMPLING_QUALITY,
+		g_param_spec_enum(
+			"resampling-quality",
+			"Resampling quality",
+			"Quality to use for resampling module samples during playback",
+			GST_TYPE_DUMB_DEC_RESAMPLING_QUALITY,
+			DEFAULT_RESAMPLING_QUALITY,
+			G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS
+		)
+	);
+	g_object_class_install_property(
+		object_class,
+		PROP_RAMP_STYLE,
+		g_param_spec_enum(
+			"ramp-style",
+			"Ramp style",
+			"Volume ramp style to use for volume changes inside module playback",
+			GST_TYPE_DUMB_DEC_RAMP_STYLE,
+			DEFAULT_RAMP_STYLE,
+			G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS
+		)
 	);
 
 	gst_element_class_set_static_metadata(
@@ -108,6 +163,121 @@ void gst_dumb_dec_init(GstDumbDec *dumb_dec)
 	dumb_dec->loop_end_reached = FALSE;
 	dumb_dec->duh = NULL;
 	dumb_dec->duh_sigrenderer = NULL;
+	dumb_dec->resampling_quality = DEFAULT_RESAMPLING_QUALITY;
+	dumb_dec->ramp_style = DEFAULT_RAMP_STYLE;
+}
+
+
+static GType gst_dumb_dec_resampling_quality_get_type(void)
+{
+	static GType gst_dumb_dec_resampling_quality_type = 0;
+
+	if (!gst_dumb_dec_resampling_quality_type)
+	{
+		static GEnumValue resampling_quality_values[] =
+		{
+			{ DUMB_RQ_ALIASING,  "Aliasing (fastest; lowest quality)", "aliasing" },
+			{ DUMB_RQ_LINEAR,    "Linear interpolation",               "linear"   },
+			{ DUMB_RQ_CUBIC,     "Cubic interpolation",                "cubic"    },
+			{ DUMB_RQ_FIR,       "FIR filter (slowest; best quality)", "fir"      },
+			{ 0, NULL, NULL },
+		};
+
+		gst_dumb_dec_resampling_quality_type = g_enum_register_static(
+			"DumbDecResamplingQuality",
+			resampling_quality_values
+		);
+	}
+
+	return gst_dumb_dec_resampling_quality_type;
+}
+
+
+static GType gst_dumb_dec_ramp_style_get_type(void)
+{
+	static GType gst_dumb_dec_ramp_style_type = 0;
+
+	if (!gst_dumb_dec_ramp_style_type)
+	{
+		static GEnumValue ramp_style_values[] =
+		{
+			{ DUMB_RAMP_STYLE_NONE,             "No volume ramping",                                            "none"             },
+			{ DUMB_RAMP_STYLE_LOGARITHMIC,      "Logarithmic volume ramping",                                   "logarithmic"      },
+			{ DUMB_RAMP_STYLE_LINEAR,           "Linear volume ramping",                                        "linear"           },
+			{ DUMB_RAMP_STYLE_XM_LIN_ELSE_NONE, "Linear volume ramping for XM modules, none for others",        "xm-lin-else-none" },
+			{ DUMB_RAMP_STYLE_XM_LIN_ELSE_LOG,  "Linear volume ramping for XM modules, logarithmic for others", "xm-lin-else-log"  },
+			{ 0, NULL, NULL },
+		};
+
+		gst_dumb_dec_ramp_style_type = g_enum_register_static(
+			"DumbDecRampStyle",
+			ramp_style_values
+		);
+	}
+
+	return gst_dumb_dec_ramp_style_type;
+}
+
+
+static void gst_dumb_dec_set_property(GObject *object, guint prop_id, const GValue *value, GParamSpec *pspec)
+{
+	GstNonstreamAudioDecoder *dec;
+	GstDumbDec *dumb_dec;
+
+	dec = GST_NONSTREAM_AUDIO_DECODER(object);
+	dumb_dec = GST_DUMB_DEC(object);
+
+	switch (prop_id)
+	{
+		case PROP_RESAMPLING_QUALITY:
+		{
+			DUMB_IT_SIGRENDERER *itsr;
+
+			GST_NONSTREAM_AUDIO_DECODER_STREAM_LOCK(dec);
+			itsr = duh_get_it_sigrenderer(dumb_dec->duh_sigrenderer);
+			dumb_it_set_resampling_quality(itsr, dumb_dec->resampling_quality);
+			GST_NONSTREAM_AUDIO_DECODER_STREAM_UNLOCK(dec);
+
+			dumb_dec->resampling_quality = g_value_get_enum(value);
+
+			break;
+		}
+		case PROP_RAMP_STYLE:
+		{
+			DUMB_IT_SIGRENDERER *itsr;
+
+			GST_NONSTREAM_AUDIO_DECODER_STREAM_LOCK(dec);
+			itsr = duh_get_it_sigrenderer(dumb_dec->duh_sigrenderer);
+			dumb_it_set_ramp_style(itsr, dumb_dec->ramp_style);
+			GST_NONSTREAM_AUDIO_DECODER_STREAM_UNLOCK(dec);
+
+			dumb_dec->ramp_style = g_value_get_enum(value);
+
+			break;
+		}
+		default:
+			gst_nonstream_audio_decoder_set_loop_property(object, prop_id, value, pspec);
+			break;
+	}
+}
+
+
+static void gst_dumb_dec_get_property(GObject *object, guint prop_id, GValue *value, GParamSpec *pspec)
+{
+	GstDumbDec *dumb_dec = GST_DUMB_DEC(object);
+
+	switch (prop_id)
+	{
+		case PROP_RESAMPLING_QUALITY:
+			g_value_set_enum(value, dumb_dec->resampling_quality);
+			break;
+		case PROP_RAMP_STYLE:
+			g_value_set_enum(value, dumb_dec->ramp_style);
+			break;
+		default:
+			gst_nonstream_audio_decoder_get_loop_property(object, prop_id, value, pspec);
+			break;
+	}
 }
 
 
@@ -337,6 +507,10 @@ static gboolean gst_dumb_dec_init_sigrenderer(GstDumbDec *dumb_dec, GstClockTime
 
 	{
 		DUMB_IT_SIGRENDERER *itsr = duh_get_it_sigrenderer(dumb_dec->duh_sigrenderer);
+
+		dumb_it_set_resampling_quality(itsr, dumb_dec->resampling_quality);
+		dumb_it_set_ramp_style(itsr, dumb_dec->ramp_style);
+
 		dumb_it_set_loop_callback(itsr, &gst_dumb_dec_loop_callback, dumb_dec);
 		dumb_it_set_xm_speed_zero_callback(itsr, &gst_dumb_dec_loop_callback, dumb_dec);
 		dumb_it_set_global_volume_zero_callback(itsr, &gst_dumb_dec_loop_callback, dumb_dec);
