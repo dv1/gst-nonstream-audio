@@ -45,6 +45,7 @@ struct _GstNonstreamAudioDecoder
 
 	GstAudioInfo audio_info;
 	gboolean output_format_changed;
+	gboolean discont;
 
 	GstAllocator *allocator;
 	GstAllocationParams allocation_params;

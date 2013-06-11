@@ -152,8 +152,13 @@ static void gst_nonstream_audio_decoder_init(GstNonstreamAudioDecoder *dec, GstN
 	dec->duration = GST_CLOCK_TIME_NONE;
 	dec->offset = 0;
 	dec->num_decoded = 0;
+
 	dec->num_subsongs = DEFAULT_NUM_SUBSONGS;
+
 	dec->loaded = FALSE;
+
+	dec->discont = TRUE;
+
 	dec->allocator = NULL;
 
 	dec->adapter = gst_adapter_new();
@@ -507,6 +512,7 @@ static gboolean gst_nonstream_audio_decoder_do_seek(GstNonstreamAudioDecoder *de
 		dec->cur_segment = segment;
 		dec->offset = gst_util_uint64_scale_int(dec->cur_segment.position, dec->audio_info.rate, GST_SECOND);
 		dec->num_decoded = 0;
+		dec->discont = TRUE;
 
 		if (flags & GST_SEEK_FLAG_SEGMENT)
 		{
@@ -688,6 +694,12 @@ static void gst_nonstream_audio_decoder_loop(GstNonstreamAudioDecoder *dec)
 			GST_BUFFER_DURATION(outbuf)  = gst_util_uint64_scale_int(num_samples, GST_SECOND, dec->audio_info.rate);
 			GST_BUFFER_OFFSET(outbuf)    = dec->offset;
 			GST_BUFFER_TIMESTAMP(outbuf) = gst_util_uint64_scale_int(dec->offset, GST_SECOND, dec->audio_info.rate);
+
+			if (G_UNLIKELY(dec->discont))
+			{
+				GST_BUFFER_FLAG_SET(outbuf, GST_BUFFER_FLAG_DISCONT);
+				dec->discont = FALSE;
+			}
 
 			dec->offset += num_samples;
 			dec->num_decoded += num_samples;
