@@ -417,12 +417,6 @@ static gboolean gst_dumb_dec_decode(GstNonstreamAudioDecoder *dec, GstBuffer **b
 
 	dumb_dec = GST_DUMB_DEC(dec);
 
-	if (dumb_dec->loop_end_reached)
-	{
-		dumb_dec->loop_end_reached = FALSE;
-		gst_nonstream_audio_decoder_handle_loop(dec, gst_dumb_dec_tell(dec));
-	}
-
 	num_samples_per_outbuf = 1024;
 	num_bytes_per_outbuf = num_samples_per_outbuf * dumb_dec->num_channels * RENDER_BIT_DEPTH / 8;
 
@@ -442,8 +436,18 @@ static gboolean gst_dumb_dec_decode(GstNonstreamAudioDecoder *dec, GstBuffer **b
 	}
 	else
 	{
+		if (actual_num_samples_read != num_samples_per_outbuf)
+			gst_buffer_set_size(outbuf, actual_num_samples_read * dumb_dec->num_channels * RENDER_BIT_DEPTH / 8);
+
 		*buffer = outbuf;
 		*num_samples = actual_num_samples_read;
+
+		if (dumb_dec->loop_end_reached)
+		{
+			dumb_dec->loop_end_reached = FALSE;
+			gst_nonstream_audio_decoder_handle_loop(dec, gst_dumb_dec_tell(dec));
+		}
+
 		return TRUE;
 	}
 }
