@@ -693,7 +693,8 @@ static void gst_nonstream_audio_decoder_loop(GstNonstreamAudioDecoder *dec)
 
 			GST_BUFFER_DURATION(outbuf)  = gst_util_uint64_scale_int(num_samples, GST_SECOND, dec->audio_info.rate);
 			GST_BUFFER_OFFSET(outbuf)    = dec->offset;
-			GST_BUFFER_TIMESTAMP(outbuf) = gst_util_uint64_scale_int(dec->offset, GST_SECOND, dec->audio_info.rate);
+			GST_BUFFER_PTS(outbuf)       = gst_util_uint64_scale_int(dec->offset, GST_SECOND, dec->audio_info.rate);
+			GST_BUFFER_DTS(outbuf)       = GST_BUFFER_PTS(outbuf);
 
 			if (G_UNLIKELY(dec->discont))
 			{
