@@ -6,8 +6,7 @@
 
 #include "gstdumbdec.h"
 
-
-/* TODO: subsongs */
+#include "dumb-kode54-git/dumb/include/internal/it.h"
 
 
 GST_DEBUG_CATEGORY_STATIC(dumbdec_debug);
@@ -16,7 +15,7 @@ GST_DEBUG_CATEGORY_STATIC(dumbdec_debug);
 
 enum
 {
-	PROP_0,
+	PROP_0 = 1000,
 	PROP_RESAMPLING_QUALITY,
 	PROP_RAMP_STYLE
 };
@@ -77,20 +76,29 @@ static GType gst_dumb_dec_resampling_quality_get_type(void);
 static GType gst_dumb_dec_ramp_style_get_type(void);
 #define GST_TYPE_DUMB_DEC_RAMP_STYLE (gst_dumb_dec_ramp_style_get_type())
 
+static void gst_dumb_dec_finalize(GObject *object);
+
 static void gst_dumb_dec_set_property(GObject *object, guint prop_id, const GValue *value, GParamSpec *pspec);
 static void gst_dumb_dec_get_property(GObject *object, guint prop_id, GValue *value, GParamSpec *pspec);
 
 static gboolean gst_dumb_dec_seek(GstNonstreamAudioDecoder *dec, GstClockTime new_position);
 static GstClockTime gst_dumb_dec_tell(GstNonstreamAudioDecoder *dec);
 
-static gboolean gst_dumb_dec_load(GstNonstreamAudioDecoder *dec, GstBuffer *source_data);
+static gboolean gst_dumb_dec_load(GstNonstreamAudioDecoder *dec, GstBuffer *source_data, guint initial_subsong, GstClockTime *initial_position);
+
+static gboolean gst_dumb_dec_set_current_subsong(GstNonstreamAudioDecoder *dec, guint subsong, GstClockTime *initial_position);
+static guint gst_dumb_dec_get_current_subsong(GstNonstreamAudioDecoder *dec);
 
 static gboolean gst_dumb_dec_set_num_loops(GstNonstreamAudioDecoder *dec, gint num_loops);
 static gint gst_dumb_dec_get_num_loops(GstNonstreamAudioDecoder *dec);
 
 static gboolean gst_dumb_dec_decode(GstNonstreamAudioDecoder *dec, GstBuffer **buffer, guint *num_samples);
 
-static gboolean gst_dumb_dec_init_sigrenderer(GstDumbDec *dumb_dec, GstClockTime seek_pos);
+static gboolean gst_dumb_dec_init_sigrenderer_at_pos(GstDumbDec *dumb_dec, long seek_pos);
+static gboolean gst_dumb_dec_init_sigrenderer_at_order(GstDumbDec *dumb_dec, int order);
+static void gst_dumb_dec_init_sigrenderer_common(GstDumbDec *dumb_dec);
+
+static void gst_dumb_scan_for_subsongs(GstDumbDec *dumb_dec);
 
 
 
@@ -109,6 +117,7 @@ void gst_dumb_dec_class_init(GstDumbDecClass *klass)
 	gst_element_class_add_pad_template(element_class, gst_static_pad_template_get(&sink_template));
 	gst_element_class_add_pad_template(element_class, gst_static_pad_template_get(&src_template));
 
+	object_class->finalize = GST_DEBUG_FUNCPTR(gst_dumb_dec_finalize);
 	object_class->set_property = GST_DEBUG_FUNCPTR(gst_dumb_dec_set_property);
 	object_class->get_property = GST_DEBUG_FUNCPTR(gst_dumb_dec_get_property);
 
@@ -118,8 +127,11 @@ void gst_dumb_dec_class_init(GstDumbDecClass *klass)
 	dec_class->set_num_loops = GST_DEBUG_FUNCPTR(gst_dumb_dec_set_num_loops);
 	dec_class->get_num_loops = GST_DEBUG_FUNCPTR(gst_dumb_dec_get_num_loops);
 	dec_class->decode = GST_DEBUG_FUNCPTR(gst_dumb_dec_decode);
+	dec_class->set_current_subsong = GST_DEBUG_FUNCPTR(gst_dumb_dec_set_current_subsong);
+	dec_class->get_current_subsong = GST_DEBUG_FUNCPTR(gst_dumb_dec_get_current_subsong);
 
 	gst_nonstream_audio_decoder_init_loop_properties(dec_class, FALSE, FALSE);
+	gst_nonstream_audio_decoder_init_subsong_properties(dec_class);
 
 	g_object_class_install_property(
 		object_class,
@@ -161,10 +173,16 @@ void gst_dumb_dec_init(GstDumbDec *dumb_dec)
 	dumb_dec->cur_loop_count = 0;
 	dumb_dec->num_loops = 0;
 	dumb_dec->loop_end_reached = FALSE;
+
 	dumb_dec->duh = NULL;
 	dumb_dec->duh_sigrenderer = NULL;
+
 	dumb_dec->resampling_quality = DEFAULT_RESAMPLING_QUALITY;
 	dumb_dec->ramp_style = DEFAULT_RAMP_STYLE;
+
+	dumb_dec->subsongs = NULL;
+	dumb_dec->cur_subsong = 0;
+	dumb_dec->cur_subsong_info = NULL;
 }
 
 
@@ -219,6 +237,20 @@ static GType gst_dumb_dec_ramp_style_get_type(void)
 }
 
 
+static void gst_dumb_dec_finalize(GObject *object)
+{
+	GstDumbDec *dumb_dec;
+
+	g_return_if_fail(GST_IS_DUMB_DEC(object));
+	dumb_dec = GST_DUMB_DEC(object);
+
+	if (dumb_dec->subsongs != NULL)
+		g_array_free(dumb_dec->subsongs, TRUE);
+
+	G_OBJECT_CLASS(gst_dumb_dec_parent_class)->finalize(object);
+}
+
+
 static void gst_dumb_dec_set_property(GObject *object, guint prop_id, const GValue *value, GParamSpec *pspec)
 {
 	GstNonstreamAudioDecoder *dec;
@@ -234,11 +266,13 @@ static void gst_dumb_dec_set_property(GObject *object, guint prop_id, const GVal
 			DUMB_IT_SIGRENDERER *itsr;
 
 			GST_NONSTREAM_AUDIO_DECODER_STREAM_LOCK(dec);
-			itsr = duh_get_it_sigrenderer(dumb_dec->duh_sigrenderer);
-			dumb_it_set_resampling_quality(itsr, dumb_dec->resampling_quality);
-			GST_NONSTREAM_AUDIO_DECODER_STREAM_UNLOCK(dec);
-
 			dumb_dec->resampling_quality = g_value_get_enum(value);
+			if (dumb_dec->duh_sigrenderer != NULL)
+			{
+				itsr = duh_get_it_sigrenderer(dumb_dec->duh_sigrenderer);
+				dumb_it_set_resampling_quality(itsr, dumb_dec->resampling_quality);
+			}
+			GST_NONSTREAM_AUDIO_DECODER_STREAM_UNLOCK(dec);
 
 			break;
 		}
@@ -247,16 +281,23 @@ static void gst_dumb_dec_set_property(GObject *object, guint prop_id, const GVal
 			DUMB_IT_SIGRENDERER *itsr;
 
 			GST_NONSTREAM_AUDIO_DECODER_STREAM_LOCK(dec);
-			itsr = duh_get_it_sigrenderer(dumb_dec->duh_sigrenderer);
-			dumb_it_set_ramp_style(itsr, dumb_dec->ramp_style);
-			GST_NONSTREAM_AUDIO_DECODER_STREAM_UNLOCK(dec);
-
 			dumb_dec->ramp_style = g_value_get_enum(value);
+			if (dumb_dec->duh_sigrenderer != NULL)
+			{
+				itsr = duh_get_it_sigrenderer(dumb_dec->duh_sigrenderer);
+				dumb_it_set_ramp_style(itsr, dumb_dec->ramp_style);
+			}
+			GST_NONSTREAM_AUDIO_DECODER_STREAM_UNLOCK(dec);
 
 			break;
 		}
 		default:
-			gst_nonstream_audio_decoder_set_loop_property(object, prop_id, value, pspec);
+			if (
+				!gst_nonstream_audio_decoder_set_subsong_property(object, prop_id, value, pspec) &&
+				!gst_nonstream_audio_decoder_set_loop_property(object, prop_id, value, pspec)
+			)
+				G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
+
 			break;
 	}
 }
@@ -275,7 +316,11 @@ static void gst_dumb_dec_get_property(GObject *object, guint prop_id, GValue *va
 			g_value_set_enum(value, dumb_dec->ramp_style);
 			break;
 		default:
-			gst_nonstream_audio_decoder_get_loop_property(object, prop_id, value, pspec);
+			if (
+				!gst_nonstream_audio_decoder_get_subsong_property(object, prop_id, value, pspec) &&
+				!gst_nonstream_audio_decoder_get_loop_property(object, prop_id, value, pspec)
+			)
+				G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
 			break;
 	}
 }
@@ -283,7 +328,18 @@ static void gst_dumb_dec_get_property(GObject *object, guint prop_id, GValue *va
 
 static gboolean gst_dumb_dec_seek(GstNonstreamAudioDecoder *dec, GstClockTime new_position)
 {
-	if (!gst_dumb_dec_init_sigrenderer(GST_DUMB_DEC(dec), new_position))
+	GstClockTime pos;
+	GstDumbDec *dumb_dec = GST_DUMB_DEC(dec);
+
+	if (dumb_dec->duh == NULL)
+	{
+		GST_WARNING_OBJECT(dec, "ignoring seek request - module is not loaded");
+		return FALSE;
+	}
+
+	pos = gst_util_uint64_scale_int(new_position, 65536, GST_SECOND) + dumb_dec->cur_subsong_start_pos;
+
+	if (!gst_dumb_dec_init_sigrenderer_at_pos(GST_DUMB_DEC(dec), pos))
 	{
 		GST_ELEMENT_ERROR(dec, STREAM, DECODE, (NULL), ("cannot reinitialize DUMB decoding"));
 		return FALSE;
@@ -301,7 +357,7 @@ static GstClockTime gst_dumb_dec_tell(GstNonstreamAudioDecoder *dec)
 	if (dumb_dec->duh_sigrenderer == NULL)
 		return 0;
 
-	pos = duh_sigrenderer_get_position(dumb_dec->duh_sigrenderer);
+	pos = duh_sigrenderer_get_position(dumb_dec->duh_sigrenderer) - dumb_dec->cur_subsong_start_pos;
 	GST_DEBUG_OBJECT(dec, "pos: %u len: %u", pos, duh_get_length(dumb_dec->duh));
 	pos = gst_util_uint64_scale_int(pos, GST_SECOND, 65536);
 
@@ -309,8 +365,9 @@ static GstClockTime gst_dumb_dec_tell(GstNonstreamAudioDecoder *dec)
 }
 
 
-static gboolean gst_dumb_dec_load(GstNonstreamAudioDecoder *dec, GstBuffer *source_data)
+static gboolean gst_dumb_dec_load(GstNonstreamAudioDecoder *dec, GstBuffer *source_data, guint initial_subsong, GstClockTime *initial_position)
 {
+	gboolean ret;
 	GstDumbDec *dumb_dec = GST_DUMB_DEC(dec);
 
 	dumb_dec->sample_rate = DEFAULT_SAMPLE_RATE;
@@ -336,7 +393,52 @@ static gboolean gst_dumb_dec_load(GstNonstreamAudioDecoder *dec, GstBuffer *sour
 		}
 	}
 
-	if (!gst_dumb_dec_init_sigrenderer(dumb_dec, 0))
+	*initial_position = 0;
+
+	gst_dumb_scan_for_subsongs(dumb_dec);
+	if (dumb_dec->subsongs == NULL)
+		dumb_dec->subsongs = g_array_new(FALSE, FALSE, sizeof(gst_dumb_dec_subsong_info));
+	GST_INFO_OBJECT(dumb_dec, "found %u subsongs", dumb_dec->subsongs->len);
+
+	if (dumb_dec->subsongs->len < 1)
+	{
+		gst_dumb_dec_subsong_info info;
+	
+		info.start_order = 0;
+		info.length = duh_get_length(dumb_dec->duh);
+
+		g_array_append_val(dumb_dec->subsongs, info);
+
+		GST_INFO_OBJECT(dumb_dec, "no subsongs present - adding entire song as one subsong, start order 0, length %d", info.length);
+	}
+
+	gst_nonstream_audio_decoder_set_num_subsongs(dec, dumb_dec->subsongs->len);
+
+	if (initial_subsong >= dumb_dec->subsongs->len)
+	{
+		GST_WARNING_OBJECT(dumb_dec, "initial subsong %u out of bounds (there are %u subsongs) - setting it to 0", initial_subsong, dumb_dec->subsongs->len);
+		initial_subsong = 0;
+	}
+
+	dumb_dec->cur_subsong = initial_subsong;
+	dumb_dec->cur_subsong_info = &g_array_index(dumb_dec->subsongs, gst_dumb_dec_subsong_info, initial_subsong);
+	dumb_dec->cur_subsong_start_pos = 0;
+
+	if (dumb_dec->cur_subsong_info->start_order == 0)
+	{
+		ret = gst_dumb_dec_init_sigrenderer_at_pos(dumb_dec, 0);
+		dumb_dec->cur_subsong_start_pos = 0;
+	}
+	else
+	{
+		ret = gst_dumb_dec_init_sigrenderer_at_order(dumb_dec, dumb_dec->cur_subsong_info->start_order);
+		if (ret)
+			dumb_dec->cur_subsong_start_pos = duh_sigrenderer_get_position(dumb_dec->duh_sigrenderer);
+		else
+			dumb_dec->cur_subsong_start_pos = 0;
+	}
+
+	if (!ret)
 	{
 		GST_ELEMENT_ERROR(dumb_dec, STREAM, DECODE, (NULL), ("cannot initialize DUMB decoding"));
 		return FALSE;
@@ -359,8 +461,8 @@ static gboolean gst_dumb_dec_load(GstNonstreamAudioDecoder *dec, GstBuffer *sour
 		if (!gst_nonstream_audio_decoder_set_output_audioinfo(dec, &audio_info))
 			return FALSE;
 	}
-	
-	gst_nonstream_audio_decoder_set_duration(dec, gst_util_uint64_scale_int(duh_get_length(dumb_dec->duh), GST_SECOND, 65536));
+
+	gst_nonstream_audio_decoder_set_duration(dec, gst_util_uint64_scale_int(dumb_dec->cur_subsong_info->length, GST_SECOND, 65536));
 
 	{
 		char const *title, *message;
@@ -381,6 +483,42 @@ static gboolean gst_dumb_dec_load(GstNonstreamAudioDecoder *dec, GstBuffer *sour
 
 
 	return TRUE;
+}
+
+
+static gboolean gst_dumb_dec_set_current_subsong(GstNonstreamAudioDecoder *dec, guint subsong, GstClockTime *initial_position)
+{
+	gst_dumb_dec_subsong_info *subsong_info;
+	GstDumbDec *dumb_dec = GST_DUMB_DEC(dec);
+
+	if (dumb_dec->duh == NULL)
+	{
+		GST_WARNING_OBJECT(dumb_dec, "could not set current subsong to %u - module not loaded", subsong);
+		return FALSE;
+	}
+
+	subsong_info = &g_array_index(dumb_dec->subsongs, gst_dumb_dec_subsong_info, subsong);
+
+	if (gst_dumb_dec_init_sigrenderer_at_order(dumb_dec, subsong_info->start_order))
+	{
+		long pos = duh_sigrenderer_get_position(dumb_dec->duh_sigrenderer);
+
+		*initial_position = 0;
+		dumb_dec->cur_subsong = subsong;
+		dumb_dec->cur_subsong_info = subsong_info;
+		dumb_dec->cur_subsong_start_pos = pos;
+		gst_nonstream_audio_decoder_set_duration(dec, gst_util_uint64_scale_int(subsong_info->length, GST_SECOND, 65536));
+		return TRUE;
+	}
+	else
+		return FALSE;
+}
+
+
+static guint gst_dumb_dec_get_current_subsong(GstNonstreamAudioDecoder *dec)
+{
+	GstDumbDec *dumb_dec = GST_DUMB_DEC(dec);
+	return dumb_dec->cur_subsong;
 }
 
 
@@ -417,6 +555,12 @@ static gboolean gst_dumb_dec_decode(GstNonstreamAudioDecoder *dec, GstBuffer **b
 
 	dumb_dec = GST_DUMB_DEC(dec);
 
+	if (dumb_dec->loop_end_reached)
+	{
+		dumb_dec->loop_end_reached = FALSE;
+		gst_nonstream_audio_decoder_handle_loop(dec, gst_dumb_dec_tell(dec));
+	}
+
 	num_samples_per_outbuf = 1024;
 	num_bytes_per_outbuf = num_samples_per_outbuf * dumb_dec->num_channels * RENDER_BIT_DEPTH / 8;
 
@@ -441,12 +585,6 @@ static gboolean gst_dumb_dec_decode(GstNonstreamAudioDecoder *dec, GstBuffer **b
 
 		*buffer = outbuf;
 		*num_samples = actual_num_samples_read;
-
-		if (dumb_dec->loop_end_reached)
-		{
-			dumb_dec->loop_end_reached = FALSE;
-			gst_nonstream_audio_decoder_handle_loop(dec, gst_dumb_dec_tell(dec));
-		}
 
 		return TRUE;
 	}
@@ -490,22 +628,59 @@ static int gst_dumb_dec_loop_callback(void *ptr)
 }
 
 
-static gboolean gst_dumb_dec_init_sigrenderer(GstDumbDec *dumb_dec, GstClockTime seek_pos)
+static gboolean gst_dumb_dec_init_sigrenderer_at_pos(GstDumbDec *dumb_dec, long seek_pos)
 {
+	DUH_SIGRENDERER *new_sr;
+
 	g_return_val_if_fail(dumb_dec->duh != NULL, FALSE);
 
-	if (dumb_dec->duh_sigrenderer != NULL)
-		duh_end_sigrenderer(dumb_dec->duh_sigrenderer);
-	dumb_dec->duh_sigrenderer = duh_start_sigrenderer(
+	new_sr = duh_start_sigrenderer(
 		dumb_dec->duh,
 		0,
 		dumb_dec->num_channels,
-		gst_util_uint64_scale_int(seek_pos, 65536, GST_SECOND)
+		seek_pos
 	);
-
-	if (dumb_dec->duh_sigrenderer == NULL)
+	if (new_sr == NULL)
 		return FALSE;
 
+	if (dumb_dec->duh_sigrenderer != NULL)
+		duh_end_sigrenderer(dumb_dec->duh_sigrenderer);
+
+	dumb_dec->duh_sigrenderer = new_sr;
+
+	gst_dumb_dec_init_sigrenderer_common(dumb_dec);
+
+	return TRUE;
+}
+
+
+static gboolean gst_dumb_dec_init_sigrenderer_at_order(GstDumbDec *dumb_dec, int order)
+{
+	DUH_SIGRENDERER *new_sr;
+
+	g_return_val_if_fail(dumb_dec->duh != NULL, FALSE);
+
+	new_sr = dumb_it_start_at_order(
+		dumb_dec->duh,
+		dumb_dec->num_channels,
+		order
+	);
+	if (new_sr == NULL)
+		return FALSE;
+
+	if (dumb_dec->duh_sigrenderer != NULL)
+		duh_end_sigrenderer(dumb_dec->duh_sigrenderer);
+
+	dumb_dec->duh_sigrenderer = new_sr;
+
+	gst_dumb_dec_init_sigrenderer_common(dumb_dec);
+
+	return TRUE;
+}
+
+
+static void gst_dumb_dec_init_sigrenderer_common(GstDumbDec *dumb_dec)
+{
 	dumb_dec->cur_loop_count = 0;
 	dumb_dec->loop_end_reached = FALSE;
 
@@ -519,8 +694,153 @@ static gboolean gst_dumb_dec_init_sigrenderer(GstDumbDec *dumb_dec, GstClockTime
 		dumb_it_set_xm_speed_zero_callback(itsr, &gst_dumb_dec_loop_callback, dumb_dec);
 		dumb_it_set_global_volume_zero_callback(itsr, &gst_dumb_dec_loop_callback, dumb_dec);
 	}
+}
 
-	return TRUE;
+
+static gboolean dumb_it_test_for_speed_and_tempo( DUMB_IT_SIGDATA * itsd )
+{
+	unsigned char pattern_tested[ 256 ];
+	memset( pattern_tested, 0, sizeof( pattern_tested ) );
+	for ( unsigned i = 0, j = itsd->n_orders; i < j; i++ )
+	{
+		long pattern_number = itsd->order[ i ];
+		if ( (pattern_number < itsd->n_patterns) && !pattern_tested[ pattern_number ] )
+		{
+			pattern_tested[ pattern_number ] = 1;
+			IT_PATTERN * pat = &itsd->pattern[ pattern_number ];
+			gboolean speed_found = FALSE, tempo_found = FALSE;
+			for ( unsigned k = 0, l = pat->n_entries; k < l; k++ )
+			{
+				IT_ENTRY * entry = &pat->entry[ k ];
+				if ( IT_IS_END_ROW( entry ) )
+				{
+					speed_found = FALSE;
+					tempo_found = FALSE;
+				}
+				else if ( entry->mask & IT_ENTRY_EFFECT &&
+					( entry->effect == IT_SET_SPEED || entry->effect == IT_SET_SONG_TEMPO ) )
+				{
+					if ( entry->effect == IT_SET_SPEED ) speed_found = TRUE;
+					else tempo_found = TRUE;
+					if ( speed_found && tempo_found ) return TRUE;
+				}
+			}
+		}
+	}
+	return FALSE;
+}
+
+
+static void dumb_it_convert_tempos( DUMB_IT_SIGDATA * itsd, gboolean vsync )
+{
+	for ( unsigned i = 0, j = itsd->n_patterns; i < j; i++ )
+	{
+		IT_PATTERN * pat = &itsd->pattern[ i ];
+		for ( unsigned k = 0, l = pat->n_entries; k < l; k++ )
+		{
+			IT_ENTRY * entry = &pat->entry[ k ];
+			if ( entry->mask & IT_ENTRY_EFFECT )
+			{
+				if ( vsync && entry->effect == IT_SET_SONG_TEMPO ) entry->effect = IT_SET_SPEED;
+				else if ( !vsync && entry->effect == IT_SET_SPEED && entry->effectvalue > 0x20 ) entry->effect = IT_SET_SONG_TEMPO;
+			}
+		}
+	}
+}
+
+
+typedef struct
+{
+	GstDumbDec *dumb_dec;
+	GArray *subsongs;
+} gst_dumb_subsong_scan_context;
+
+
+static int gst_dumb_scan_callback(void *context, int order, long length)
+{
+	gst_dumb_subsong_scan_context *ctx;
+	gst_dumb_dec_subsong_info info;
+	
+	ctx = (gst_dumb_subsong_scan_context *)context;
+	GST_INFO_OBJECT(ctx->dumb_dec, "Found subsong: order %d length %d", order, length);
+
+	info.start_order = order;
+	info.length = length;
+
+	g_array_append_val(ctx->subsongs, info);
+
+	return 0;
+}
+
+
+static void gst_dumb_scan_for_subsongs(GstDumbDec *dumb_dec)
+{
+	char const *format;
+	int start_order;
+	int is_mod;
+	gst_dumb_subsong_scan_context ctx;
+	GArray *subsongs;
+
+	subsongs = g_array_new(FALSE, FALSE, sizeof(gst_dumb_dec_subsong_info));
+
+	ctx.dumb_dec = dumb_dec;
+	ctx.subsongs = subsongs;
+
+	format = duh_get_tag(dumb_dec->duh, "FORMAT");
+	start_order = dumb_it_scan_for_playable_orders(duh_get_it_sigdata(dumb_dec->duh), gst_dumb_scan_callback, &ctx);
+
+	is_mod = (strcmp(format, "MOD") == 0);
+
+	if (!start_order && is_mod)
+	{
+		DUMB_IT_SIGDATA *itsd = duh_get_it_sigdata(dumb_dec->duh);
+
+		if (!dumb_it_test_for_speed_and_tempo(itsd))
+		{
+			GArray *mod_subsongs;
+			mod_subsongs = g_array_new(FALSE, FALSE, sizeof(gst_dumb_dec_subsong_info));
+			ctx.subsongs = mod_subsongs;
+
+			dumb_it_convert_tempos(itsd, TRUE);
+			start_order = dumb_it_scan_for_playable_orders(duh_get_it_sigdata(dumb_dec->duh), gst_dumb_scan_callback, &ctx);
+			if (!start_order)
+			{
+				guint i;
+				long total_length_original;
+				long total_length_vblank;
+				gst_dumb_dec_subsong_info *subsong_info;
+				gst_dumb_dec_subsong_info *mod_subsong_info;
+
+				total_length_original = 0;
+				total_length_vblank = 0;
+				subsong_info = (gst_dumb_dec_subsong_info *)(subsongs->data);
+				mod_subsong_info = (gst_dumb_dec_subsong_info *)(mod_subsongs->data);
+
+				/* Safe to assume that both have the same song count as
+				   speed/tempo don't affect song flow control */
+				for (i = 0; i < subsongs->len; ++i)
+				{
+					total_length_original += subsong_info[i].length;
+					total_length_vblank += mod_subsong_info[i].length;
+				}
+
+				if (
+					(total_length_original != 0) ||
+					(
+						(total_length_vblank != 0) && (total_length_vblank < total_length_original)
+					)
+				)
+				{
+					for (i = 0; i < subsongs->len; ++i)
+						subsong_info[i].length = mod_subsong_info[i].length;
+				}
+			}
+
+			g_array_free(mod_subsongs, TRUE);
+		}
+	}
+
+	dumb_dec->subsongs = subsongs;
 }
 
 

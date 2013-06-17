@@ -39,7 +39,7 @@ struct _GstNonstreamAudioDecoder
 	guint64 offset, num_decoded;
 	GstSegment cur_segment;
 
-	guint num_subsongs;
+	guint initial_subsong, num_subsongs;
 
 	gboolean loaded;
 
@@ -69,10 +69,10 @@ struct _GstNonstreamAudioDecoderClass
 	gboolean (*seek)(GstNonstreamAudioDecoder *dec, GstClockTime new_position);
 	GstClockTime (*tell)(GstNonstreamAudioDecoder *dec);
 
-	gboolean (*load)(GstNonstreamAudioDecoder *dec, GstBuffer *source_data);
+	gboolean (*load)(GstNonstreamAudioDecoder *dec, GstBuffer *source_data, guint initial_subsong, GstClockTime *initial_position);
 
+	gboolean (*set_current_subsong)(GstNonstreamAudioDecoder *dec, guint subsong, GstClockTime *initial_position);
 	guint (*get_current_subsong)(GstNonstreamAudioDecoder *dec);
-	gboolean (*set_current_subsong)(GstNonstreamAudioDecoder *dec, guint subsong);
 
 	gboolean (*set_num_loops)(GstNonstreamAudioDecoder *dec, gint num_loops);
 	gint (*get_num_loops)(GstNonstreamAudioDecoder *dec);
@@ -91,17 +91,18 @@ GType gst_nonstream_audio_decoder_get_type(void);
 void gst_nonstream_audio_decoder_set_duration(GstNonstreamAudioDecoder *dec, GstClockTime duration);
 
 void gst_nonstream_audio_decoder_init_subsong_properties(GstNonstreamAudioDecoderClass *klass);
-void gst_nonstream_audio_decoder_set_subsong_property(GObject *object, guint prop_id, const GValue *value, GParamSpec *pspec);
-void gst_nonstream_audio_decoder_get_subsong_property(GObject *object, guint prop_id, GValue *value, GParamSpec *pspec);
+gboolean gst_nonstream_audio_decoder_set_subsong_property(GObject *object, guint prop_id, const GValue *value, GParamSpec *pspec);
+gboolean gst_nonstream_audio_decoder_get_subsong_property(GObject *object, guint prop_id, GValue *value, GParamSpec *pspec);
 void gst_nonstream_audio_decoder_set_num_subsongs(GstNonstreamAudioDecoder *dec, guint num_subsongs);
 
 void gst_nonstream_audio_decoder_init_loop_properties(GstNonstreamAudioDecoderClass *klass, gboolean infinite_only, gboolean open_ended);
 void gst_nonstream_audio_decoder_handle_loop(GstNonstreamAudioDecoder *dec, GstClockTime new_position);
-void gst_nonstream_audio_decoder_set_loop_property(GObject *object, guint prop_id, const GValue *value, GParamSpec *pspec);
-void gst_nonstream_audio_decoder_get_loop_property(GObject *object, guint prop_id, GValue *value, GParamSpec *pspec);
+gboolean gst_nonstream_audio_decoder_set_loop_property(GObject *object, guint prop_id, const GValue *value, GParamSpec *pspec);
+gboolean gst_nonstream_audio_decoder_get_loop_property(GObject *object, guint prop_id, GValue *value, GParamSpec *pspec);
 
 gboolean gst_nonstream_audio_decoder_set_output_audioinfo(GstNonstreamAudioDecoder *dec, GstAudioInfo const *info);
 gboolean gst_nonstream_audio_decoder_negotiate(GstNonstreamAudioDecoder *dec);
+/* TODO: make this return GstCaps* instead of only sample_rate and num_channels */
 void gst_nonstream_audio_decoder_get_downstream_format(GstNonstreamAudioDecoder *dec, gint *sample_rate, gint *num_channels);
 
 GstBuffer * gst_nonstream_audio_decoder_allocate_output_buffer(GstNonstreamAudioDecoder *dec, gsize size);
