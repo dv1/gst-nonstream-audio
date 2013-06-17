@@ -395,6 +395,7 @@ static gboolean gst_dumb_dec_load(GstNonstreamAudioDecoder *dec, GstBuffer *sour
 
 	*initial_position = 0;
 
+	/* TODO: PSM modules have explicit subsong information; use it! */
 	gst_dumb_scan_for_subsongs(dumb_dec);
 	if (dumb_dec->subsongs == NULL)
 		dumb_dec->subsongs = g_array_new(FALSE, FALSE, sizeof(gst_dumb_dec_subsong_info));
