@@ -61,7 +61,7 @@ struct _GstNonstreamAudioDecoderClass
 {
 	GstElementClass element_class;
 
-	gboolean loops_infinite_only, open_ended;
+	gboolean open_ended;
 
 	/*< public >*/
 	/* virtual methods for subclasses */
@@ -73,6 +73,7 @@ struct _GstNonstreamAudioDecoderClass
 
 	gboolean (*set_current_subsong)(GstNonstreamAudioDecoder *dec, guint subsong, GstClockTime *initial_position);
 	guint (*get_current_subsong)(GstNonstreamAudioDecoder *dec);
+	guint (*get_num_subsongs)(GstNonstreamAudioDecoder *dec);
 
 	gboolean (*set_num_loops)(GstNonstreamAudioDecoder *dec, gint num_loops);
 	gint (*get_num_loops)(GstNonstreamAudioDecoder *dec);
@@ -89,16 +90,8 @@ struct _GstNonstreamAudioDecoderClass
 GType gst_nonstream_audio_decoder_get_type(void);
 
 void gst_nonstream_audio_decoder_set_duration(GstNonstreamAudioDecoder *dec, GstClockTime duration);
-
-void gst_nonstream_audio_decoder_init_subsong_properties(GstNonstreamAudioDecoderClass *klass);
-gboolean gst_nonstream_audio_decoder_set_subsong_property(GObject *object, guint prop_id, const GValue *value, GParamSpec *pspec);
-gboolean gst_nonstream_audio_decoder_get_subsong_property(GObject *object, guint prop_id, GValue *value, GParamSpec *pspec);
-void gst_nonstream_audio_decoder_set_num_subsongs(GstNonstreamAudioDecoder *dec, guint num_subsongs);
-
-void gst_nonstream_audio_decoder_init_loop_properties(GstNonstreamAudioDecoderClass *klass, gboolean infinite_only, gboolean open_ended);
+void gst_nonstream_audio_decoder_class_set_open_ended_mode(GstNonstreamAudioDecoderClass *klass, gboolean mode);
 void gst_nonstream_audio_decoder_handle_loop(GstNonstreamAudioDecoder *dec, GstClockTime new_position);
-gboolean gst_nonstream_audio_decoder_set_loop_property(GObject *object, guint prop_id, const GValue *value, GParamSpec *pspec);
-gboolean gst_nonstream_audio_decoder_get_loop_property(GObject *object, guint prop_id, GValue *value, GParamSpec *pspec);
 
 gboolean gst_nonstream_audio_decoder_set_output_audioinfo(GstNonstreamAudioDecoder *dec, GstAudioInfo const *info);
 gboolean gst_nonstream_audio_decoder_negotiate(GstNonstreamAudioDecoder *dec);

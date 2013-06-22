@@ -15,7 +15,7 @@ GST_DEBUG_CATEGORY_STATIC(dumbdec_debug);
 
 enum
 {
-	PROP_0 = 1000,
+	PROP_0,
 	PROP_RESAMPLING_QUALITY,
 	PROP_RAMP_STYLE
 };
@@ -88,6 +88,7 @@ static gboolean gst_dumb_dec_load(GstNonstreamAudioDecoder *dec, GstBuffer *sour
 
 static gboolean gst_dumb_dec_set_current_subsong(GstNonstreamAudioDecoder *dec, guint subsong, GstClockTime *initial_position);
 static guint gst_dumb_dec_get_current_subsong(GstNonstreamAudioDecoder *dec);
+static guint gst_dumb_dec_get_num_subsongs(GstNonstreamAudioDecoder *dec);
 
 static gboolean gst_dumb_dec_set_num_loops(GstNonstreamAudioDecoder *dec, gint num_loops);
 static gint gst_dumb_dec_get_num_loops(GstNonstreamAudioDecoder *dec);
@@ -129,9 +130,7 @@ void gst_dumb_dec_class_init(GstDumbDecClass *klass)
 	dec_class->decode = GST_DEBUG_FUNCPTR(gst_dumb_dec_decode);
 	dec_class->set_current_subsong = GST_DEBUG_FUNCPTR(gst_dumb_dec_set_current_subsong);
 	dec_class->get_current_subsong = GST_DEBUG_FUNCPTR(gst_dumb_dec_get_current_subsong);
-
-	gst_nonstream_audio_decoder_init_loop_properties(dec_class, FALSE, FALSE);
-	gst_nonstream_audio_decoder_init_subsong_properties(dec_class);
+	dec_class->get_num_subsongs = GST_DEBUG_FUNCPTR(gst_dumb_dec_get_num_subsongs);
 
 	g_object_class_install_property(
 		object_class,
@@ -183,6 +182,7 @@ void gst_dumb_dec_init(GstDumbDec *dumb_dec)
 	dumb_dec->subsongs = NULL;
 	dumb_dec->cur_subsong = 0;
 	dumb_dec->cur_subsong_info = NULL;
+	dumb_dec->num_subsongs = 0;
 }
 
 
@@ -251,7 +251,7 @@ static void gst_dumb_dec_finalize(GObject *object)
 }
 
 
-static void gst_dumb_dec_set_property(GObject *object, guint prop_id, const GValue *value, GParamSpec *pspec)
+static void gst_dumb_dec_set_property(GObject *object, guint prop_id, const GValue *value, G_GNUC_UNUSED GParamSpec *pspec)
 {
 	GstNonstreamAudioDecoder *dec;
 	GstDumbDec *dumb_dec;
@@ -292,18 +292,12 @@ static void gst_dumb_dec_set_property(GObject *object, guint prop_id, const GVal
 			break;
 		}
 		default:
-			if (
-				!gst_nonstream_audio_decoder_set_subsong_property(object, prop_id, value, pspec) &&
-				!gst_nonstream_audio_decoder_set_loop_property(object, prop_id, value, pspec)
-			)
-				G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
-
 			break;
 	}
 }
 
 
-static void gst_dumb_dec_get_property(GObject *object, guint prop_id, GValue *value, GParamSpec *pspec)
+static void gst_dumb_dec_get_property(GObject *object, guint prop_id, GValue *value, G_GNUC_UNUSED GParamSpec *pspec)
 {
 	GstDumbDec *dumb_dec = GST_DUMB_DEC(object);
 
@@ -316,11 +310,6 @@ static void gst_dumb_dec_get_property(GObject *object, guint prop_id, GValue *va
 			g_value_set_enum(value, dumb_dec->ramp_style);
 			break;
 		default:
-			if (
-				!gst_nonstream_audio_decoder_get_subsong_property(object, prop_id, value, pspec) &&
-				!gst_nonstream_audio_decoder_get_loop_property(object, prop_id, value, pspec)
-			)
-				G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
 			break;
 	}
 }
@@ -413,11 +402,11 @@ static gboolean gst_dumb_dec_load(GstNonstreamAudioDecoder *dec, GstBuffer *sour
 		GST_INFO_OBJECT(dumb_dec, "no subsongs present - adding entire song as one subsong, start order 0, length %d", info.length);
 	}
 
-	gst_nonstream_audio_decoder_set_num_subsongs(dec, dumb_dec->subsongs->len);
+	dumb_dec->num_subsongs = dumb_dec->subsongs->len;
 
-	if (initial_subsong >= dumb_dec->subsongs->len)
+	if (initial_subsong >= dumb_dec->num_subsongs)
 	{
-		GST_WARNING_OBJECT(dumb_dec, "initial subsong %u out of bounds (there are %u subsongs) - setting it to 0", initial_subsong, dumb_dec->subsongs->len);
+		GST_WARNING_OBJECT(dumb_dec, "initial subsong %u out of bounds (there are %u subsongs) - setting it to 0", initial_subsong, dumb_dec->num_subsongs);
 		initial_subsong = 0;
 	}
 
@@ -520,6 +509,13 @@ static guint gst_dumb_dec_get_current_subsong(GstNonstreamAudioDecoder *dec)
 {
 	GstDumbDec *dumb_dec = GST_DUMB_DEC(dec);
 	return dumb_dec->cur_subsong;
+}
+
+
+static guint gst_dumb_dec_get_num_subsongs(GstNonstreamAudioDecoder *dec)
+{
+	GstDumbDec *dumb_dec = GST_DUMB_DEC(dec);
+	return dumb_dec->num_subsongs;
 }
 
 
