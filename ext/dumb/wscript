@@ -1,0 +1,25 @@
+#!/usr/bin/env python
+
+
+def configure(conf):
+	conf.env['DEFINES_DUMB'] = []
+	if conf.env['SSE_SUPPORTED']:
+		conf.env['DEFINES_DUMB'] += ['_USE_SSE']
+	if conf.env['HAVE_ALLOCA']:
+		conf.env['DEFINES_DUMB'] += ['HAVE_ALLOCA_H']
+	if conf.options.enable_debug:
+		conf.env['DEFINES_DUMB'] += ['DEBUGMODE']
+
+
+def build(bld):
+	dumb_source = bld.path.ant_glob('*.c') + bld.path.ant_glob('dumb-kode54-git/dumb/src/**/*.c')
+	bld(
+		features = ['c', 'cshlib'],
+		includes = ['../..', '../../gst-libs', '.', 'dumb-kode54-git/dumb/include'],
+		uselib = 'GSTREAMER GSTREAMER_BASE GSTREAMER_AUDIO DUMB',
+		use = 'gstnonstreamaudio',
+		target = 'gstdumb',
+		source = dumb_source,
+		install_path = bld.env['PLUGIN_INSTALL_PATH']
+	)
+

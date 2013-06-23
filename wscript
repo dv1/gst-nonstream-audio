@@ -37,10 +37,10 @@ def add_compiler_flags(conf, env, flags, lang, compiler, uselib = ''):
 
 
 def options(opt):
-	opt.add_option('--enable-debug', action='store_true', default=False, help='enable debug build [default: %default]')
-	opt.add_option('--with-package-name', action='store', default="gstmpg123 plug-in source release", help='specify package name to use in plugin [default: %default]')
-	opt.add_option('--with-package-origin', action='store', default="Unknown package origin", help='specify package origin URL to use in plugin [default: %default]')
-	opt.add_option('--plugin-install-path', action='store', default="${PREFIX}/lib/gstreamer-1.0", help='where to install the plugin for GStreamer 1.0 [default: %default]')
+	opt.add_option('--enable-debug', action = 'store_true', default = False, help = 'enable debug build [default: %default]')
+	opt.add_option('--with-package-name', action = 'store', default = "gstmpg123 plug-in source release", help = 'specify package name to use in plugin [default: %default]')
+	opt.add_option('--with-package-origin', action = 'store', default = "Unknown package origin", help = 'specify package origin URL to use in plugin [default: %default]')
+	opt.add_option('--plugin-install-path', action = 'store', default = "${PREFIX}/lib/gstreamer-1.0", help = 'where to install the plugin for GStreamer 1.0 [default: %default]')
 	opt.load('compiler_c')
 
 
@@ -59,7 +59,6 @@ def configure(conf):
 		check_compiler_flags_2(conf, conf.env['CFLAGS'], '', "Testing compiler flags %s" % ' '.join(conf.env['CFLAGS']))
 	elif conf.env['LINKFLAGS']:
 		check_compiler_flags_2(conf, '', conf.env['LINKFLAGS'], "Testing linker flags %s" % ' '.join(conf.env['LINKFLAGS']))
-
 	compiler_flags = ['-Wextra', '-Wall', '-std=c99', '-pedantic', '-fPIC', '-DPIC']
 	if conf.options.enable_debug:
 		compiler_flags += ['-O0', '-g3', '-ggdb']
@@ -68,6 +67,7 @@ def configure(conf):
 
 	add_compiler_flags(conf, conf.env, compiler_flags, 'C', 'CC')
 
+	# test for SSE
 	sse_test_fragment = """
 	  #include <xmmintrin.h>
 	  __m128 testfunc(float *a, float *b) { return _mm_add_ps(_mm_loadu_ps(a), _mm_loadu_ps(b)); }
@@ -78,24 +78,23 @@ def configure(conf):
 	    return 0;
 	  }
 	"""
-	if conf.check(fragment = sse_test_fragment, execute = 0, define_ret = 0, msg = 'Checking for SSE support', okmsg = 'yes', errmsg = 'no', mandatory = 0):
-		conf.env['DEFINES_SSE'] = ['_USE_SSE']
+	conf.env['SSE_SUPPORTED'] = conf.check(fragment = sse_test_fragment, execute = 0, define_ret = 0, msg = 'Checking for SSE support', okmsg = 'yes', errmsg = 'no', mandatory = 0)	
 
-	conf.env['DEFINES_ALLOCA'] = ['HAVE_ALLOCA_H']
-	if conf.options.enable_debug:
-		conf.env['DEFINES_ALLOCA'] += ['DEBUGMODE']
-
+	# test for alloca.h
+	conf.check_c(header_name = 'alloca.h', uselib_store = 'ALLOCA', mandatory = 0)
 
 	# test for GStreamer libraries
-
-	conf.check_cfg(package='gstreamer-1.0 >= 1.0.0', uselib_store='GSTREAMER', args='--cflags --libs', mandatory=1)
-	conf.check_cfg(package='gstreamer-base-1.0 >= 1.0.0', uselib_store='GSTREAMER_BASE', args='--cflags --libs', mandatory=1)
-	conf.check_cfg(package='gstreamer-audio-1.0 >= 1.0.0', uselib_store='GSTREAMER_AUDIO', args='--cflags --libs', mandatory=1)
+	conf.check_cfg(package = 'gstreamer-1.0 >= 1.0.0',       uselib_store = 'GSTREAMER',       args = '--cflags --libs', mandatory = 1)
+	conf.check_cfg(package = 'gstreamer-base-1.0 >= 1.0.0',  uselib_store = 'GSTREAMER_BASE',  args = '--cflags --libs', mandatory = 1)
+	conf.check_cfg(package = 'gstreamer-audio-1.0 >= 1.0.0', uselib_store = 'GSTREAMER_AUDIO', args = '--cflags --libs', mandatory = 1)
 	conf.env['PLUGIN_INSTALL_PATH'] = os.path.expanduser(conf.options.plugin_install_path)
 	conf.define('GST_PACKAGE_NAME', conf.options.with_package_name)
 	conf.define('GST_PACKAGE_ORIGIN', conf.options.with_package_origin)
 	conf.define('PACKAGE', "gstnonstreamaudio")
 	conf.define('VERSION', "1.0")
+
+	conf.recurse('ext/dumb')
+
 	conf.write_config_header('config.h')
 
 
@@ -110,15 +109,6 @@ def build(bld):
 		name = 'gstnonstreamaudio',
 		source = nonstreamaudio_source
 	)
-	dumb_source = bld.srcnode.ant_glob('ext/dumb/*.c') + bld.srcnode.ant_glob('ext/dumb/dumb-kode54-git/dumb/src/**/*.c')
-	bld(
-		features = ['c', 'cshlib'],
-		includes = ['.', 'gst-libs', 'ext/dumb', 'ext/dumb/dumb-kode54-git/dumb/include'],
-		uselib = 'GSTREAMER GSTREAMER_BASE GSTREAMER_AUDIO SSE ALLOCA',
-		use = 'gstnonstreamaudio',
-		target = 'gstdumb',
-		source = dumb_source,
-		install_path = bld.env['PLUGIN_INSTALL_PATH']
-	)
 
+	bld.recurse('ext/dumb')
 
