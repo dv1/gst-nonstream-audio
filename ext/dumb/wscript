@@ -1,17 +1,26 @@
 #!/usr/bin/env python
 
+from waflib import Logs
+
 
 def configure(conf):
 	conf.env['DEFINES_DUMB'] = []
 	if conf.env['SSE_SUPPORTED']:
 		conf.env['DEFINES_DUMB'] += ['_USE_SSE']
-	if conf.env['HAVE_ALLOCA']:
+	if conf.env['WITH_ALLOCA']:
 		conf.env['DEFINES_DUMB'] += ['HAVE_ALLOCA_H']
+		conf.env['BUILD_DUMB'] = 1
+		conf.env['ENABLED_PLUGINS'] += ['dumbdec']
+	else:
+		Logs.pprint('RED', 'alloca.h not found -> cannot build DUMB decoder plugin')
+		conf.env['DISABLED_PLUGINS']['dumbdec'] = 'alloca.h not found'
 	if conf.options.enable_debug:
 		conf.env['DEFINES_DUMB'] += ['DEBUGMODE']
 
 
 def build(bld):
+	if not bld.env['BUILD_DUMB']:
+		return
 	dumb_source = bld.path.ant_glob('*.c') + bld.path.ant_glob('dumb-kode54-git/dumb/src/**/*.c')
 	bld(
 		features = ['c', 'cshlib'],

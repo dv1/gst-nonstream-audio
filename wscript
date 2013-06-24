@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-from waflib.Build import BuildContext, CleanContext, InstallContext, UninstallContext
+from waflib.Build import BuildContext, CleanContext, InstallContext, UninstallContext, Logs
 
 top = '.'
 out = 'build'
@@ -81,7 +81,7 @@ def configure(conf):
 	conf.env['SSE_SUPPORTED'] = conf.check(fragment = sse_test_fragment, execute = 0, define_ret = 0, msg = 'Checking for SSE support', okmsg = 'yes', errmsg = 'no', mandatory = 0)	
 
 	# test for alloca.h
-	conf.check_c(header_name = 'alloca.h', uselib_store = 'ALLOCA', mandatory = 0)
+	conf.env['WITH_ALLOCA'] = conf.check_cc(header_name = 'alloca.h', uselib_store = 'ALLOCA', mandatory = 0)
 
 	# test for GStreamer libraries
 	conf.check_cfg(package = 'gstreamer-1.0 >= 1.0.0',       uselib_store = 'GSTREAMER',       args = '--cflags --libs', mandatory = 1)
@@ -93,10 +93,23 @@ def configure(conf):
 	conf.define('PACKAGE', "gstnonstreamaudio")
 	conf.define('VERSION', "1.0")
 
+	conf.env['ENABLED_PLUGINS'] = []
+	conf.env['DISABLED_PLUGINS'] = {}
+
 	conf.recurse('ext/dumb')
 
 	conf.write_config_header('config.h')
 
+	Logs.pprint('NORMAL', '')
+	if len(conf.env['ENABLED_PLUGINS']) > 0:
+		Logs.pprint('NORMAL', 'The following plugins will be built:')
+		for plugin in conf.env['ENABLED_PLUGINS']:
+			Logs.pprint('NORMAL', '    %s' % plugin)
+	if len(conf.env['DISABLED_PLUGINS']) > 0:
+		Logs.pprint('NORMAL', 'The following plugins will NOT be built:')
+		for plugin in conf.env['DISABLED_PLUGINS'].keys():
+			reason = conf.env['DISABLED_PLUGINS'][plugin]
+			Logs.pprint('NORMAL', '    %s : %s' % (plugin, reason))
 
 
 def build(bld):
