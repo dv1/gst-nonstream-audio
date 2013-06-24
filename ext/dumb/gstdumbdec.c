@@ -362,7 +362,7 @@ static gboolean gst_dumb_dec_load(GstNonstreamAudioDecoder *dec, GstBuffer *sour
 
 	dumb_dec->sample_rate = DEFAULT_SAMPLE_RATE;
 	dumb_dec->num_channels = DEFAULT_NUM_CHANNELS;
-	gst_nonstream_audio_decoder_get_downstream_format(dec, &(dumb_dec->sample_rate), &(dumb_dec->num_channels));
+	gst_nonstream_audio_decoder_get_downstream_info(dec, NULL, &(dumb_dec->sample_rate), &(dumb_dec->num_channels));
 
 	{
 		GstMapInfo map;

@@ -1149,11 +1149,11 @@ gboolean gst_nonstream_audio_decoder_negotiate(GstNonstreamAudioDecoder *dec)
 }
 
 
-void gst_nonstream_audio_decoder_get_downstream_format(GstNonstreamAudioDecoder *dec, gint *sample_rate, gint *num_channels)
+void gst_nonstream_audio_decoder_get_downstream_info(GstNonstreamAudioDecoder *dec, GstAudioFormat *format, gint *sample_rate, gint *num_channels)
 {
 	GstCaps *allowed_srccaps;
 	guint structure_nr, num_structures;
-	gboolean ds_rate_found, ds_channels_found;
+	gboolean ds_format_found, ds_rate_found, ds_channels_found;
 
 	g_return_if_fail(GST_IS_NONSTREAM_AUDIO_DECODER(dec));
 
@@ -1163,6 +1163,7 @@ void gst_nonstream_audio_decoder_get_downstream_format(GstNonstreamAudioDecoder 
 		allowed_srccaps = gst_caps_normalize(allowed_srccaps_unnorm);
 	}
 
+	ds_format_found = FALSE;
 	ds_rate_found = FALSE;
 	ds_channels_found = FALSE;
 
@@ -1172,12 +1173,24 @@ void gst_nonstream_audio_decoder_get_downstream_format(GstNonstreamAudioDecoder 
 	for (structure_nr = 0; structure_nr < num_structures; ++structure_nr)
 	{
 		GstStructure *structure;
+		gchar const *format_str;
 
 		ds_rate_found = FALSE;
 		ds_channels_found = FALSE;
 
 		structure = gst_caps_get_structure(allowed_srccaps, structure_nr);
 
+		if ((format != NULL) && (format_str = gst_structure_get_string(structure, "format")))
+		{
+			GstAudioFormat fmt = gst_audio_format_from_string(format_str);
+			if (fmt == GST_AUDIO_FORMAT_UNKNOWN)
+				GST_WARNING_OBJECT(dec, "caps structure %" GST_PTR_FORMAT " does not contain a valid format", structure);
+			else
+			{
+				GST_DEBUG_OBJECT(dec, "got format from structure #%u : %s", structure_nr, fmt);
+				ds_format_found = TRUE;
+			}
+		}
 		if ((sample_rate != NULL) && gst_structure_get_int(structure, "rate", sample_rate))
 		{
 			GST_DEBUG_OBJECT(dec, "got sample rate from structure #%u : %d Hz", structure_nr, *sample_rate);
@@ -1189,12 +1202,14 @@ void gst_nonstream_audio_decoder_get_downstream_format(GstNonstreamAudioDecoder 
 			ds_channels_found = TRUE;
 		}
 
-		if (ds_rate_found || ds_channels_found)
+		if (ds_format_found || ds_rate_found || ds_channels_found)
 			break;
 	}
 
 	gst_caps_unref(allowed_srccaps);
 
+	if ((format != NULL) && !ds_format_found)
+		GST_INFO_OBJECT(dec, "downstream did not specify format - using default (%s)", gst_audio_format_to_string(*format));
 	if ((sample_rate != NULL) && !ds_rate_found)
 		GST_INFO_OBJECT(dec, "downstream did not specify sample rate - using default (%d Hz)", *sample_rate);
 	if ((num_channels != NULL) && !ds_channels_found)
