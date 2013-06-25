@@ -56,12 +56,7 @@ static GstElementClass *gst_nonstream_audio_decoder_parent_class = NULL;
 
 
 
-/*
-TODO:
-- hard-flush & reset functions (if these make sense with module etc. music)
-- study GstAudioDecoder code more
-- what about negative playback rates ?
-*/
+/* TODO: what about negative playback rates ? */
 
 
 
