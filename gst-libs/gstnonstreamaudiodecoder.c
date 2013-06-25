@@ -56,9 +56,6 @@ static GstElementClass *gst_nonstream_audio_decoder_parent_class = NULL;
 
 
 
-/* TODO: what about negative playback rates ? */
-
-
 
 static char const * get_seek_type_name(GstSeekType seek_type)
 {
@@ -478,6 +475,12 @@ static gboolean gst_nonstream_audio_decoder_do_seek(GstNonstreamAudioDecoder *de
 	if (format != GST_FORMAT_TIME)
 	{
 		GST_DEBUG_OBJECT(dec, "seeking is only supported in TIME format");
+		return FALSE;
+	}
+
+	if (rate < 0)
+	{
+		GST_DEBUG_OBJECT(dec, "only positive seek rates are supported");
 		return FALSE;
 	}
 
