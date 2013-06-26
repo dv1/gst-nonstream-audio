@@ -35,6 +35,7 @@ struct _GstDumbDec
 
 	gint cur_loop_count, num_loops;
 	gboolean loop_end_reached;
+	gboolean do_actual_looping;
 
 	gint resampling_quality, ramp_style;
 
@@ -45,6 +46,7 @@ struct _GstDumbDec
 	guint cur_subsong, num_subsongs;
 	gst_dumb_dec_subsong_info *cur_subsong_info;
 	long cur_subsong_start_pos;
+
 };
 
 

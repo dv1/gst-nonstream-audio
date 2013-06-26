@@ -13,6 +13,14 @@ typedef struct _GstNonstreamAudioDecoder GstNonstreamAudioDecoder;
 typedef struct _GstNonstreamAudioDecoderClass GstNonstreamAudioDecoderClass;
 
 
+typedef enum
+{
+	GST_NONSTREM_AUDIO_OUTPUT_MODE_LOOPING = 0,
+	GST_NONSTREM_AUDIO_OUTPUT_MODE_STEADY = 1,
+	GST_NONSTREM_AUDIO_OUTPUT_MODE_UNDEFINED
+} GstNonstreamAudioOutputMode;
+
+
 #define GST_TYPE_NONSTREAM_AUDIO_DECODER             (gst_nonstream_audio_decoder_get_type())
 #define GST_NONSTREAM_AUDIO_DECODER(obj)             (G_TYPE_CHECK_INSTANCE_CAST((obj), GST_TYPE_NONSTREAM_AUDIO_DECODER, GstNonstreamAudioDecoder))
 #define GST_NONSTREAM_AUDIO_DECODER_CLASS(klass)     (G_TYPE_CHECK_CLASS_CAST((klass), GST_TYPE_NONSTREAM_AUDIO_DECODER, GstNonstreamAudioDecoderClass))
@@ -43,6 +51,8 @@ struct _GstNonstreamAudioDecoder
 
 	gboolean loaded;
 
+	GstNonstreamAudioOutputMode output_mode;
+
 	GstAudioInfo audio_info;
 	gboolean output_format_changed;
 	gboolean discont;
@@ -61,15 +71,13 @@ struct _GstNonstreamAudioDecoderClass
 {
 	GstElementClass element_class;
 
-	gboolean open_ended;
-
 	/*< public >*/
 	/* virtual methods for subclasses */
 
 	gboolean (*seek)(GstNonstreamAudioDecoder *dec, GstClockTime new_position);
 	GstClockTime (*tell)(GstNonstreamAudioDecoder *dec);
 
-	gboolean (*load)(GstNonstreamAudioDecoder *dec, GstBuffer *source_data, guint initial_subsong, GstClockTime *initial_position);
+	gboolean (*load)(GstNonstreamAudioDecoder *dec, GstBuffer *source_data, guint initial_subsong, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode);
 
 	gboolean (*set_current_subsong)(GstNonstreamAudioDecoder *dec, guint subsong, GstClockTime *initial_position);
 	guint (*get_current_subsong)(GstNonstreamAudioDecoder *dec);
@@ -77,6 +85,9 @@ struct _GstNonstreamAudioDecoderClass
 
 	gboolean (*set_num_loops)(GstNonstreamAudioDecoder *dec, gint num_loops);
 	gint (*get_num_loops)(GstNonstreamAudioDecoder *dec);
+
+	guint (*get_supported_output_modes)(GstNonstreamAudioDecoder *dec);
+	gboolean (*set_output_mode)(GstNonstreamAudioDecoder *dec, GstNonstreamAudioOutputMode mode, GstClockTime *current_position);
 
 	gboolean (*decode)(GstNonstreamAudioDecoder *dec, GstBuffer **buffer, guint *num_samples);
 
@@ -90,7 +101,6 @@ struct _GstNonstreamAudioDecoderClass
 GType gst_nonstream_audio_decoder_get_type(void);
 
 void gst_nonstream_audio_decoder_set_duration(GstNonstreamAudioDecoder *dec, GstClockTime duration);
-void gst_nonstream_audio_decoder_class_set_open_ended_mode(GstNonstreamAudioDecoderClass *klass, gboolean mode);
 void gst_nonstream_audio_decoder_handle_loop(GstNonstreamAudioDecoder *dec, GstClockTime new_position);
 
 gboolean gst_nonstream_audio_decoder_set_output_audioinfo(GstNonstreamAudioDecoder *dec, GstAudioInfo const *info);

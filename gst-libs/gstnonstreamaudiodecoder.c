@@ -14,13 +14,20 @@ enum
 	PROP_0,
 	PROP_CURRENT_SUBSONG,
 	PROP_NUM_SUBSONGS,
-	PROP_NUM_LOOPS
+	PROP_NUM_LOOPS,
+	PROP_OUTPUT_MODE
 };
 
 #define DEFAULT_CURRENT_SUBSONG 0
 #define DEFAULT_NUM_SUBSONGS 0
 #define DEFAULT_NUM_LOOPS 0
-#define DEFAULT_LOOPS_INFINITE_ONLY FALSE
+#define DEFAULT_OUTPUT_MODE GST_NONSTREM_AUDIO_OUTPUT_MODE_STEADY
+
+
+
+static GType gst_nonstream_audio_decoder_output_mode_get_type(void);
+#define GST_TYPE_NONSTREAM_AUDIO_DECODER_OUTPUT_MODE (gst_nonstream_audio_decoder_output_mode_get_type())
+
 
 
 static void gst_nonstream_audio_decoder_class_init(GstNonstreamAudioDecoderClass *klass);
@@ -53,6 +60,31 @@ static void gst_nonstream_audio_decoder_get_property(GObject *object, guint prop
 static void gst_nonstream_audio_decoder_finalize(GObject *object);
 
 static GstElementClass *gst_nonstream_audio_decoder_parent_class = NULL;
+
+
+
+
+static GType gst_nonstream_audio_decoder_output_mode_get_type(void)
+{
+	static GType gst_nonstream_audio_decoder_output_mode_type = 0;
+
+	if (!gst_nonstream_audio_decoder_output_mode_type)
+	{
+		static GEnumValue output_mode_values[] =
+		{
+			{ GST_NONSTREM_AUDIO_OUTPUT_MODE_LOOPING,              "Looping output",         "looping" },
+			{ GST_NONSTREM_AUDIO_OUTPUT_MODE_STEADY,               "Steady output",          "steady"  },
+			{ 0, NULL, NULL },
+		};
+
+		gst_nonstream_audio_decoder_output_mode_type = g_enum_register_static(
+			"NonstreamAudioOutputMode",
+			output_mode_values
+		);
+	}
+
+	return gst_nonstream_audio_decoder_output_mode_type;
+}
 
 
 
@@ -161,7 +193,18 @@ static void gst_nonstream_audio_decoder_class_init(GstNonstreamAudioDecoderClass
 		)
 	);
 
-	dec_class->open_ended = FALSE;
+	g_object_class_install_property(
+		object_class,
+		PROP_OUTPUT_MODE,
+		g_param_spec_enum(
+			"output-mode",
+			"Output mode",
+			"Which mode playback shall use when a loop is encountered; looping = reset position to start of loop, steady = do not reset position",
+			GST_TYPE_NONSTREAM_AUDIO_DECODER_OUTPUT_MODE,
+			DEFAULT_OUTPUT_MODE,
+			G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS
+		)
+	);
 
 	dec_class->seek = NULL;
 	dec_class->tell = NULL;
@@ -190,6 +233,8 @@ static void gst_nonstream_audio_decoder_init(GstNonstreamAudioDecoder *dec, GstN
 	dec->num_subsongs = DEFAULT_NUM_SUBSONGS;
 
 	dec->loaded = FALSE;
+
+	dec->output_mode = GST_NONSTREM_AUDIO_OUTPUT_MODE_UNDEFINED;
 
 	dec->discont = TRUE;
 
@@ -267,7 +312,7 @@ static gboolean gst_nonstream_audio_decoder_sink_event(GstPad *pad, GstObject *p
 }
 
 
-static GstFlowReturn gst_nonstream_audio_decoder_chain(G_GNUC_UNUSED GstPad *pad, GstObject *parent, GstBuffer *buffer)
+static GstFlowReturn gst_nonstream_audio_decoder_chain(GstPad *pad, GstObject *parent, GstBuffer *buffer)
 {
 	GstNonstreamAudioDecoder *dec = GST_NONSTREAM_AUDIO_DECODER(parent);
 
@@ -654,7 +699,7 @@ static gboolean gst_nonstream_audio_decoder_load(GstNonstreamAudioDecoder *dec, 
 	dec_class = GST_NONSTREAM_AUDIO_DECODER_CLASS(G_OBJECT_GET_CLASS(dec));
 
 	initial_position = 0;
-	module_ok = dec_class->load(dec, buffer, dec->initial_subsong, &initial_position);
+	module_ok = dec_class->load(dec, buffer, dec->initial_subsong, &initial_position, &(dec->output_mode));
 	gst_buffer_unref(buffer);
 
 	if (!module_ok)
@@ -666,8 +711,8 @@ static gboolean gst_nonstream_audio_decoder_load(GstNonstreamAudioDecoder *dec, 
 	gst_segment_init(&(dec->cur_segment), GST_FORMAT_TIME);
 	dec->cur_segment.start = initial_position;
 	dec->cur_segment.time = initial_position;
-	dec->cur_segment.stop = dec_class->open_ended ? ((GstClockTime)(-1)) : dec->duration;
-	dec->cur_segment.duration = dec_class->open_ended ? ((GstClockTime)(-1)) : dec->duration;
+	dec->cur_segment.stop = (dec->output_mode == GST_NONSTREM_AUDIO_OUTPUT_MODE_STEADY) ? ((GstClockTime)(-1)) : dec->duration;
+	dec->cur_segment.duration = (dec->output_mode == GST_NONSTREM_AUDIO_OUTPUT_MODE_STEADY) ? ((GstClockTime)(-1)) : dec->duration;
 	dec->offset = gst_util_uint64_scale_int(initial_position, dec->audio_info.rate, GST_SECOND);
 	gst_pad_push_event(dec->srcpad, gst_event_new_segment(&(dec->cur_segment)));
 
@@ -907,10 +952,62 @@ static void gst_nonstream_audio_decoder_set_property(GObject *object, guint prop
 
 	switch (prop_id)
 	{
+		case PROP_OUTPUT_MODE:
+		{
+			GstNonstreamAudioOutputMode new_output_mode;
+			new_output_mode = g_value_get_enum(value);
+
+			g_assert(klass->get_supported_output_modes);
+
+			if ((klass->get_supported_output_modes(dec) & (1u << new_output_mode)) == 0)
+			{
+				GST_WARNING_OBJECT(dec, "could not set output mode to %s (not supported by subclass)", (new_output_mode == GST_NONSTREM_AUDIO_OUTPUT_MODE_STEADY) ? "steady" : "looping");
+				break;
+			}
+
+			GST_NONSTREAM_AUDIO_DECODER_STREAM_LOCK(dec);
+			if (new_output_mode != dec->output_mode)
+			{
+				if (dec->loaded)
+				{
+					GstClockTime cur_position;
+					gboolean proceed = TRUE;
+
+					if (klass->set_output_mode != NULL)
+					{
+						if (klass->set_output_mode(dec, new_output_mode, &cur_position))
+							proceed = TRUE;
+						else
+						{
+							proceed = FALSE;
+							GST_WARNING_OBJECT(dec, "switching to new output mode failed");
+						}
+					}
+
+					if (proceed)
+					{
+						dec->cur_segment.base = gst_util_uint64_scale_int(dec->num_decoded, GST_SECOND, dec->audio_info.rate);
+						dec->cur_segment.start = cur_position;
+						dec->cur_segment.time = cur_position;
+						dec->cur_segment.stop = (dec->output_mode == GST_NONSTREM_AUDIO_OUTPUT_MODE_STEADY) ? ((GstClockTime)(-1)) : dec->duration;
+						dec->cur_segment.duration = (dec->output_mode == GST_NONSTREM_AUDIO_OUTPUT_MODE_STEADY) ? ((GstClockTime)(-1)) : dec->duration;
+						dec->offset = gst_util_uint64_scale_int(cur_position, dec->audio_info.rate, GST_SECOND);
+						gst_pad_push_event(dec->srcpad, gst_event_new_segment(&(dec->cur_segment)));
+
+						dec->output_mode = new_output_mode;
+					}
+				}
+				else
+					dec->output_mode = new_output_mode;
+			}
+			GST_NONSTREAM_AUDIO_DECODER_STREAM_UNLOCK(dec);
+			break;
+		}
 		case PROP_CURRENT_SUBSONG:
 		{
+			guint new_subsong;
 			GST_NONSTREAM_AUDIO_DECODER_STREAM_LOCK(dec);
-			guint new_subsong = g_value_get_uint(value);
+			new_subsong = g_value_get_uint(value);
 			if (dec->loaded)
 			{
 				if (klass->set_current_subsong != NULL)
@@ -967,6 +1064,9 @@ static void gst_nonstream_audio_decoder_get_property(GObject *object, guint prop
 
 	switch (prop_id)
 	{
+		case PROP_OUTPUT_MODE:
+			g_value_set_enum(value, dec->output_mode);
+			break;
 		case PROP_CURRENT_SUBSONG:
 		{
 			GST_NONSTREAM_AUDIO_DECODER_STREAM_LOCK(dec);
@@ -1035,22 +1135,15 @@ void gst_nonstream_audio_decoder_set_duration(GstNonstreamAudioDecoder *dec, Gst
 }
 
 
-void gst_nonstream_audio_decoder_class_set_open_ended_mode(GstNonstreamAudioDecoderClass *klass, gboolean mode)
-{
-	g_return_if_fail(GST_IS_NONSTREAM_AUDIO_DECODER_CLASS(klass));
-	klass->open_ended = mode;
-}
-
-
 void gst_nonstream_audio_decoder_handle_loop(GstNonstreamAudioDecoder *dec, GstClockTime new_position)
 {
 	/* NOTE: handle_loop must be called AFTER the last samples of the loop have been decoded and pushed downstream */
 
 	GstNonstreamAudioDecoderClass *klass = GST_NONSTREAM_AUDIO_DECODER_GET_CLASS(dec);
-	if (klass->open_ended)
+	if (dec->output_mode == GST_NONSTREM_AUDIO_OUTPUT_MODE_STEADY)
 	{
 		/* handle_loop makes no sense with open-ended decoders */
-		GST_WARNING_OBJECT(dec, "ignoring handle_loop() call, since the decoder is open-ended");
+		GST_WARNING_OBJECT(dec, "ignoring handle_loop() call, since the decoder output mode is \"steady\"");
 		return;
 	}
 
