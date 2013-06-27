@@ -85,7 +85,7 @@ static void gst_dumb_dec_get_property(GObject *object, guint prop_id, GValue *va
 static gboolean gst_dumb_dec_seek(GstNonstreamAudioDecoder *dec, GstClockTime new_position);
 static GstClockTime gst_dumb_dec_tell(GstNonstreamAudioDecoder *dec);
 
-static gboolean gst_dumb_dec_load(GstNonstreamAudioDecoder *dec, GstBuffer *source_data, guint initial_subsong, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode);
+static gboolean gst_dumb_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, GstBuffer *source_data, guint initial_subsong, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode);
 
 static gboolean gst_dumb_dec_set_current_subsong(GstNonstreamAudioDecoder *dec, guint subsong, GstClockTime *initial_position);
 static guint gst_dumb_dec_get_current_subsong(GstNonstreamAudioDecoder *dec);
@@ -128,7 +128,7 @@ void gst_dumb_dec_class_init(GstDumbDecClass *klass)
 
 	dec_class->seek = GST_DEBUG_FUNCPTR(gst_dumb_dec_seek);
 	dec_class->tell = GST_DEBUG_FUNCPTR(gst_dumb_dec_tell);
-	dec_class->load = GST_DEBUG_FUNCPTR(gst_dumb_dec_load);
+	dec_class->load_from_buffer = GST_DEBUG_FUNCPTR(gst_dumb_dec_load_from_buffer);
 	dec_class->set_num_loops = GST_DEBUG_FUNCPTR(gst_dumb_dec_set_num_loops);
 	dec_class->get_num_loops = GST_DEBUG_FUNCPTR(gst_dumb_dec_get_num_loops);
 	dec_class->get_supported_output_modes = GST_DEBUG_FUNCPTR(gst_dumb_dec_get_supported_output_modes);
@@ -369,7 +369,7 @@ static GstClockTime gst_dumb_dec_tell(GstNonstreamAudioDecoder *dec)
 }
 
 
-static gboolean gst_dumb_dec_load(GstNonstreamAudioDecoder *dec, GstBuffer *source_data, guint initial_subsong, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode)
+static gboolean gst_dumb_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, GstBuffer *source_data, guint initial_subsong, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode)
 {
 	gboolean ret;
 	GstDumbDec *dumb_dec = GST_DUMB_DEC(dec);

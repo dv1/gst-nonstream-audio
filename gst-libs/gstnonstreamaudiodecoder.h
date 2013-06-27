@@ -77,7 +77,7 @@ struct _GstNonstreamAudioDecoderClass
 	gboolean (*seek)(GstNonstreamAudioDecoder *dec, GstClockTime new_position);
 	GstClockTime (*tell)(GstNonstreamAudioDecoder *dec);
 
-	gboolean (*load)(GstNonstreamAudioDecoder *dec, GstBuffer *source_data, guint initial_subsong, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode);
+	gboolean (*load_from_buffer)(GstNonstreamAudioDecoder *dec, GstBuffer *source_data, guint initial_subsong, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode);
 
 	gboolean (*set_current_subsong)(GstNonstreamAudioDecoder *dec, guint subsong, GstClockTime *initial_position);
 	guint (*get_current_subsong)(GstNonstreamAudioDecoder *dec);

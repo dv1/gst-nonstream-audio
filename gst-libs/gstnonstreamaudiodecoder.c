@@ -208,7 +208,7 @@ static void gst_nonstream_audio_decoder_class_init(GstNonstreamAudioDecoderClass
 
 	dec_class->seek = NULL;
 	dec_class->tell = NULL;
-	dec_class->load = NULL;
+	dec_class->load_from_buffer = NULL;
 	dec_class->get_current_subsong = NULL;
 	dec_class->set_current_subsong = NULL;
 	dec_class->get_num_subsongs = NULL;
@@ -699,7 +699,7 @@ static gboolean gst_nonstream_audio_decoder_load(GstNonstreamAudioDecoder *dec, 
 	dec_class = GST_NONSTREAM_AUDIO_DECODER_CLASS(G_OBJECT_GET_CLASS(dec));
 
 	initial_position = 0;
-	module_ok = dec_class->load(dec, buffer, dec->initial_subsong, &initial_position, &(dec->output_mode));
+	module_ok = dec_class->load_from_buffer(dec, buffer, dec->initial_subsong, &initial_position, &(dec->output_mode));
 	gst_buffer_unref(buffer);
 
 	if (!module_ok)
@@ -734,7 +734,7 @@ static void gst_nonstream_audio_decoder_loop(GstNonstreamAudioDecoder *dec)
 		GstBuffer *buffer;
 		GstFlowReturn flow;
 
-		g_assert(dec_class->load != NULL);
+		g_assert(dec_class->load_from_buffer != NULL);
 
 		if (!gst_nonstream_audio_decoder_get_upstream_size(dec, &size))
 		{
