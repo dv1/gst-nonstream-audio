@@ -10,10 +10,10 @@ def configure(conf):
 	if conf.env['WITH_ALLOCA']:
 		conf.env['DEFINES_DUMB'] += ['HAVE_ALLOCA_H']
 		conf.env['BUILD_DUMB'] = 1
-		conf.env['ENABLED_PLUGINS'] += ['dumbdec']
+		conf.env['ENABLED_PLUGINS'] += ['dumb']
 	else:
 		Logs.pprint('RED', 'alloca.h not found -> cannot build DUMB decoder plugin')
-		conf.env['DISABLED_PLUGINS']['dumbdec'] = 'alloca.h not found'
+		conf.env['DISABLED_PLUGINS']['dumb'] = 'alloca.h not found'
 	if conf.options.enable_debug:
 		conf.env['DEFINES_DUMB'] += ['DEBUGMODE']
 

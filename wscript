@@ -123,5 +123,6 @@ def build(bld):
 		source = nonstreamaudio_source
 	)
 
-	bld.recurse('ext/dumb')
+	for plugin in bld.env['ENABLED_PLUGINS']:
+		bld.recurse('ext/' + plugin)
 
