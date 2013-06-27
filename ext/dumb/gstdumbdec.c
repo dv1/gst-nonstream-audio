@@ -253,6 +253,12 @@ static void gst_dumb_dec_finalize(GObject *object)
 	if (dumb_dec->subsongs != NULL)
 		g_array_free(dumb_dec->subsongs, TRUE);
 
+	if (dumb_dec->duh_sigrenderer != NULL)
+		duh_end_sigrenderer(dumb_dec->duh_sigrenderer);
+
+	if (dumb_dec->duh != NULL)
+		unload_duh(dumb_dec->duh);
+
 	G_OBJECT_CLASS(gst_dumb_dec_parent_class)->finalize(object);
 }
 
