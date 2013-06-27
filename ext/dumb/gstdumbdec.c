@@ -189,6 +189,8 @@ void gst_dumb_dec_init(GstDumbDec *dumb_dec)
 	dumb_dec->cur_subsong = 0;
 	dumb_dec->cur_subsong_info = NULL;
 	dumb_dec->num_subsongs = 0;
+	dumb_dec->subsongs_explicit = FALSE;
+	dumb_dec->cur_subsong_start_pos = 0;
 }
 
 
@@ -381,9 +383,47 @@ static gboolean gst_dumb_dec_load(GstNonstreamAudioDecoder *dec, GstBuffer *sour
 		DUMBFILE *dumbfile;
 
 		gst_buffer_map(source_data, &map, GST_MAP_READ);
+
+		{
+			int subsong_idx, num_psm_subsongs;
+			DUH *psm_duh;
+
+			dumb_dec->subsongs = NULL;
+
+			dumbfile = dumbfile_open_memory((char const *)(map.data), map.size);
+			num_psm_subsongs = dumb_get_psm_subsong_count(dumbfile);
+			dumbfile_close(dumbfile);
+
+			if (num_psm_subsongs > 0)
+			{
+				GST_INFO_OBJECT(dec, "song data contains information about %d subsongs - reading", num_psm_subsongs);
+				gst_dumb_dec_subsong_info *subsong_info;
+				dumb_dec->subsongs = g_array_new(FALSE, FALSE, sizeof(gst_dumb_dec_subsong_info));
+				g_array_set_size(dumb_dec->subsongs, num_psm_subsongs);
+				subsong_info = (gst_dumb_dec_subsong_info *)(dumb_dec->subsongs->data);
+
+				for (subsong_idx = 0; subsong_idx < num_psm_subsongs; ++subsong_idx)
+				{
+					dumbfile = dumbfile_open_memory((char const *)(map.data), map.size);
+					psm_duh = dumb_read_any(dumbfile, 0/*restrict_*/, subsong_idx);
+					if (psm_duh != NULL)
+					{
+						long len = dumb_it_build_checkpoints(duh_get_it_sigdata(psm_duh), 0);
+						GST_DEBUG_OBJECT(dumb_dec, "subsong %d: length %d", subsong_idx, len);
+						unload_duh(psm_duh);
+						subsong_info[subsong_idx].start_order = 0;
+						subsong_info[subsong_idx].length = len;
+					}
+					dumbfile_close(dumbfile);
+				}
+
+				dumb_dec->subsongs_explicit = TRUE;
+			}
+		}
+
 		dumbfile = dumbfile_open_memory((char const *)(map.data), map.size);
 
-		dumb_dec->duh = dumb_read_any(dumbfile, 0/*restrict_*/, 0/*subsong*/);
+		dumb_dec->duh = dumb_read_any(dumbfile, 0/*restrict_*/, dumb_dec->subsongs_explicit ? initial_subsong : (guint)0);
 
 		dumbfile_close(dumbfile);
 		gst_buffer_unmap(source_data, &map);
@@ -402,11 +442,16 @@ static gboolean gst_dumb_dec_load(GstNonstreamAudioDecoder *dec, GstBuffer *sour
 
 	dumb_dec->do_actual_looping = ((*initial_output_mode) == GST_NONSTREM_AUDIO_OUTPUT_MODE_LOOPING);
 
-	/* TODO: PSM modules have explicit subsong information; use it! */
-	gst_dumb_scan_for_subsongs(dumb_dec);
+	/* In case there is no dedicated subsong information inside the song data, scan the song for these
+	   many modules contain isolated subsets that act as subsongs */
 	if (dumb_dec->subsongs == NULL)
-		dumb_dec->subsongs = g_array_new(FALSE, FALSE, sizeof(gst_dumb_dec_subsong_info));
-	GST_INFO_OBJECT(dumb_dec, "found %u subsongs", dumb_dec->subsongs->len);
+	{
+		GST_INFO_OBJECT(dumb_dec, "song data does not contain subsong information - searching for subsongs by scanning");
+		gst_dumb_scan_for_subsongs(dumb_dec);
+		if (dumb_dec->subsongs == NULL)
+			dumb_dec->subsongs = g_array_new(FALSE, FALSE, sizeof(gst_dumb_dec_subsong_info));
+		GST_INFO_OBJECT(dumb_dec, "found %u subsongs by scanning", dumb_dec->subsongs->len);
+	}
 
 	if (dumb_dec->subsongs->len < 1)
 	{
@@ -417,7 +462,7 @@ static gboolean gst_dumb_dec_load(GstNonstreamAudioDecoder *dec, GstBuffer *sour
 
 		g_array_append_val(dumb_dec->subsongs, info);
 
-		GST_INFO_OBJECT(dumb_dec, "no subsongs present - adding entire song as one subsong, start order 0, length %d", info.length);
+		GST_INFO_OBJECT(dumb_dec, "no subsongs found - adding entire song as one subsong, start order 0, length %d", info.length);
 	}
 
 	dumb_dec->num_subsongs = dumb_dec->subsongs->len;
@@ -509,12 +554,12 @@ static gboolean gst_dumb_dec_set_current_subsong(GstNonstreamAudioDecoder *dec, 
 
 	if (gst_dumb_dec_init_sigrenderer_at_order(dumb_dec, subsong_info->start_order))
 	{
-		long pos = duh_sigrenderer_get_position(dumb_dec->duh_sigrenderer);
+		long subsong_start_pos = dumb_dec->subsongs_explicit ? (long)0 : duh_sigrenderer_get_position(dumb_dec->duh_sigrenderer);
 
 		*initial_position = 0;
 		dumb_dec->cur_subsong = subsong;
 		dumb_dec->cur_subsong_info = subsong_info;
-		dumb_dec->cur_subsong_start_pos = pos;
+		dumb_dec->cur_subsong_start_pos = subsong_start_pos;
 		gst_nonstream_audio_decoder_set_duration(dec, gst_util_uint64_scale_int(subsong_info->length, GST_SECOND, 65536));
 		return TRUE;
 	}
@@ -793,7 +838,7 @@ static int gst_dumb_scan_callback(void *context, int order, long length)
 	gst_dumb_dec_subsong_info info;
 	
 	ctx = (gst_dumb_subsong_scan_context *)context;
-	GST_INFO_OBJECT(ctx->dumb_dec, "Found subsong: order %d length %d", order, length);
+	GST_DEBUG_OBJECT(ctx->dumb_dec, "found subsong in scan callback: order %d length %d", order, length);
 
 	info.start_order = order;
 	info.length = length;
@@ -825,6 +870,8 @@ static void gst_dumb_scan_for_subsongs(GstDumbDec *dumb_dec)
 	if (!start_order && is_mod)
 	{
 		DUMB_IT_SIGDATA *itsd = duh_get_it_sigdata(dumb_dec->duh);
+
+		GST_DEBUG_OBJECT(dumb_dec, "song format is MOD -> need to repeat scan because of tempo conversion");
 
 		if (!dumb_it_test_for_speed_and_tempo(itsd))
 		{

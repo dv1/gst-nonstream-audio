@@ -45,6 +45,7 @@ struct _GstDumbDec
 	GArray *subsongs;
 	guint cur_subsong, num_subsongs;
 	gst_dumb_dec_subsong_info *cur_subsong_info;
+	gboolean subsongs_explicit;
 	long cur_subsong_start_pos;
 
 };
