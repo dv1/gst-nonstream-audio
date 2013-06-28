@@ -85,6 +85,7 @@ static void gst_dumb_dec_get_property(GObject *object, guint prop_id, GValue *va
 static gboolean gst_dumb_dec_seek(GstNonstreamAudioDecoder *dec, GstClockTime new_position);
 static GstClockTime gst_dumb_dec_tell(GstNonstreamAudioDecoder *dec);
 
+static guint gst_dumb_dec_check_initial_subsong_index(GstDumbDec *dumb_dec, guint initial_subsong);
 static gboolean gst_dumb_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, GstBuffer *source_data, guint initial_subsong, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode);
 
 static gboolean gst_dumb_dec_set_current_subsong(GstNonstreamAudioDecoder *dec, guint subsong, GstClockTime *initial_position);
@@ -369,6 +370,18 @@ static GstClockTime gst_dumb_dec_tell(GstNonstreamAudioDecoder *dec)
 }
 
 
+static guint gst_dumb_dec_check_initial_subsong_index(GstDumbDec *dumb_dec, guint initial_subsong)
+{
+	if (initial_subsong >= dumb_dec->num_subsongs)
+	{
+		GST_WARNING_OBJECT(dumb_dec, "initial subsong %u out of bounds (there are %u subsongs) - setting it to 0", initial_subsong, dumb_dec->num_subsongs);
+		initial_subsong = 0;
+	}
+
+	return initial_subsong;
+}
+
+
 static gboolean gst_dumb_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, GstBuffer *source_data, guint initial_subsong, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode)
 {
 	gboolean ret;
@@ -418,6 +431,8 @@ static gboolean gst_dumb_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, Gst
 				}
 
 				dumb_dec->subsongs_explicit = TRUE;
+				dumb_dec->num_subsongs = num_psm_subsongs;
+				initial_subsong = gst_dumb_dec_check_initial_subsong_index(dumb_dec, initial_subsong);
 			}
 		}
 
@@ -467,11 +482,7 @@ static gboolean gst_dumb_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, Gst
 
 	dumb_dec->num_subsongs = dumb_dec->subsongs->len;
 
-	if (initial_subsong >= dumb_dec->num_subsongs)
-	{
-		GST_WARNING_OBJECT(dumb_dec, "initial subsong %u out of bounds (there are %u subsongs) - setting it to 0", initial_subsong, dumb_dec->num_subsongs);
-		initial_subsong = 0;
-	}
+	initial_subsong = gst_dumb_dec_check_initial_subsong_index(dumb_dec, initial_subsong);
 
 	dumb_dec->cur_subsong = initial_subsong;
 	dumb_dec->cur_subsong_info = &g_array_index(dumb_dec->subsongs, gst_dumb_dec_subsong_info, initial_subsong);
