@@ -1132,6 +1132,11 @@ void gst_nonstream_audio_decoder_set_duration(GstNonstreamAudioDecoder *dec, Gst
 {
 	g_return_if_fail(GST_IS_NONSTREAM_AUDIO_DECODER(dec));
 	dec->duration = duration;
+
+	GstTagList *tags;
+	tags = gst_tag_list_new_empty();
+	gst_tag_list_add(tags, GST_TAG_MERGE_REPLACE, GST_TAG_DURATION, duration, NULL);
+	gst_pad_push_event(dec->srcpad, gst_event_new_tag(tags));
 }
 
 
