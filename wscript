@@ -42,6 +42,7 @@ def options(opt):
 	opt.add_option('--with-package-origin', action = 'store', default = "Unknown package origin", help = 'specify package origin URL to use in plugin [default: %default]')
 	opt.add_option('--plugin-install-path', action = 'store', default = "${PREFIX}/lib/gstreamer-1.0", help = 'where to install the plugin for GStreamer 1.0 [default: %default]')
 	opt.load('compiler_c')
+	opt.load('compiler_cxx')
 
 
 
@@ -50,6 +51,7 @@ def configure(conf):
 
 
 	conf.load('compiler_c')
+	conf.load('compiler_cxx')
 
 
 	# check and add compiler flags
@@ -59,13 +61,18 @@ def configure(conf):
 		check_compiler_flags_2(conf, conf.env['CFLAGS'], '', "Testing compiler flags %s" % ' '.join(conf.env['CFLAGS']))
 	elif conf.env['LINKFLAGS']:
 		check_compiler_flags_2(conf, '', conf.env['LINKFLAGS'], "Testing linker flags %s" % ' '.join(conf.env['LINKFLAGS']))
-	compiler_flags = ['-Wextra', '-Wall', '-std=c99', '-pedantic', '-fPIC', '-DPIC']
+	c_compiler_flags = ['-Wextra', '-Wall', '-std=c99', '-pedantic', '-fPIC', '-DPIC']
+	cxx_compiler_flags = ['-Wextra', '-Wall',  '-pedantic', '-fPIC', '-DPIC']
+	common_compiler_flags = []
 	if conf.options.enable_debug:
-		compiler_flags += ['-O0', '-g3', '-ggdb']
+		common_compiler_flags = ['-O0', '-g3', '-ggdb']
 	else:
-		compiler_flags += ['-O2', '-s']
+		common_compiler_flags = ['-O2', '-s']
+	c_compiler_flags += common_compiler_flags
+	cxx_compiler_flags += common_compiler_flags
 
-	add_compiler_flags(conf, conf.env, compiler_flags, 'C', 'CC')
+	add_compiler_flags(conf, conf.env, c_compiler_flags, 'C', 'CC')
+	add_compiler_flags(conf, conf.env, cxx_compiler_flags, 'CXX', 'CXX')
 
 	# test for SSE
 	sse_test_fragment = """
@@ -83,6 +90,9 @@ def configure(conf):
 	# test for alloca.h
 	conf.env['WITH_ALLOCA'] = conf.check_cc(header_name = 'alloca.h', uselib_store = 'ALLOCA', mandatory = 0)
 
+	# test for stdint.h
+	conf.env['WITH_STDINT'] = conf.check_cc(header_name = 'stdint.h', uselib_store = 'STDINT', mandatory = 0)
+
 	# test for GStreamer libraries
 	conf.check_cfg(package = 'gstreamer-1.0 >= 1.0.0',       uselib_store = 'GSTREAMER',       args = '--cflags --libs', mandatory = 1)
 	conf.check_cfg(package = 'gstreamer-base-1.0 >= 1.0.0',  uselib_store = 'GSTREAMER_BASE',  args = '--cflags --libs', mandatory = 1)
@@ -97,6 +107,7 @@ def configure(conf):
 	conf.env['DISABLED_PLUGINS'] = {}
 
 	conf.recurse('ext/dumb')
+	conf.recurse('ext/gme')
 
 	conf.write_config_header('config.h')
 

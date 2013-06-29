@@ -1,0 +1,161 @@
+#!/usr/bin/env python
+
+from waflib import Logs
+
+
+def configure(conf):
+	conf.env['DEFINES_GME'] = []
+	conf.env['CFLAGS_GME'] = ['-Wno-unused-parameter', '-Wno-unused-value', '-Wno-unused-but-set-variable', '-Wno-long-long']
+	conf.env['CXXFLAGS_GME'] = conf.env['CFLAGS_GME']
+
+	if conf.env['WITH_STDINT']:
+		conf.env['DEFINES_GME'] += ['HAVE_STDINT_H']
+		conf.env['ENABLED_PLUGINS'] += ['gme']
+	else:
+		Logs.pprint('RED', 'stdint.h not found -> cannot build GME decoder plugin')
+		conf.env['DISABLED_PLUGINS']['gme'] = 'stdint.h not found'
+		return
+
+	if not conf.options.enable_debug:
+		conf.env['DEFINES_GME'] += ['NDEBUG']
+
+	conf.env['GME_ENABLED'] = 1
+
+
+def build(bld):
+	if not bld.env['GME_ENABLED']:
+		return
+
+	gme_source = [ \
+		"Z80_Cpu.cpp", \
+		"ymz280b.c", \
+		"Ymz280b_Emu.cpp", \
+		"Ymf262_Emu.cpp", \
+		"ymdeltat.cpp", \
+		"Ym3812_Emu.cpp", \
+		"Ym2612_Emu.cpp", \
+		"Ym2612_Emu_MAME.cpp", \
+		"Ym2610b_Emu.cpp", \
+		"Ym2608_Emu.cpp", \
+		"ym2413.c", \
+		"Ym2413_Emu.cpp", \
+		"Ym2203_Emu.cpp", \
+		"ym2151.c", \
+		"Ym2151_Emu.cpp", \
+		"Vgm_Emu.cpp", \
+		"Vgm_Core.cpp", \
+		"Upsampler.cpp", \
+		"Track_Filter.cpp", \
+		"Spc_Filter.cpp", \
+		"Spc_Emu.cpp", \
+		"Spc_Dsp.cpp", \
+		"Spc_Cpu.cpp", \
+		"Snes_Spc.cpp", \
+		"Sms_Fm_Apu.cpp", \
+		"Sms_Apu.cpp", \
+		"Sgc_Impl.cpp", \
+		"Sgc_Emu.cpp", \
+		"Sgc_Cpu.cpp", \
+		"Sgc_Core.cpp", \
+		"segapcm.c", \
+		"SegaPcm_Emu.cpp", \
+		"scd_pcm.c", \
+		"Sap_Emu.cpp", \
+		"Sap_Cpu.cpp", \
+		"Sap_Core.cpp", \
+		"Sap_Apu.cpp", \
+		"s_opltbl.c", \
+		"s_opl.c", \
+		"s_logtbl.c", \
+		"s_deltat.c", \
+		"Rom_Data.cpp", \
+		"Rf5C164_Emu.cpp", \
+		"rf5c68.c", \
+		"Rf5C68_Emu.cpp", \
+		"Resampler.cpp", \
+		"pwm.c", \
+		"Pwm_Emu.cpp", \
+		"Opl_Apu.cpp", \
+		"okim6295.c", \
+		"Okim6295_Emu.cpp", \
+		"okim6258.c", \
+		"Okim6258_Emu.cpp", \
+		"Nsfe_Emu.cpp", \
+		"Nsf_Impl.cpp", \
+		"Nsf_Emu.cpp", \
+		"Nsf_Cpu.cpp", \
+		"Nsf_Core.cpp", \
+		"Nes_Vrc7_Apu.cpp", \
+		"Nes_Vrc6_Apu.cpp", \
+		"Nes_Oscs.cpp", \
+		"Nes_Namco_Apu.cpp", \
+		"Nes_Fme7_Apu.cpp", \
+		"Nes_Fds_Apu.cpp", \
+		"Nes_Cpu.cpp", \
+		"Nes_Apu.cpp", \
+		"Music_Emu.cpp", \
+		"Multi_Buffer.cpp", \
+		"M3u_Playlist.cpp", \
+		"Kss_Scc_Apu.cpp", \
+		"Kss_Emu.cpp", \
+		"Kss_Cpu.cpp", \
+		"Kss_Core.cpp", \
+		"k054539.c", \
+		"K054539_Emu.cpp", \
+		"k053260.c", \
+		"K053260_Emu.cpp", \
+		"k051649.c", \
+		"K051649_Emu.cpp", \
+		"Hes_Emu.cpp", \
+		"Hes_Cpu.cpp", \
+		"Hes_Core.cpp", \
+		"Hes_Apu.cpp", \
+		"Hes_Apu_Adpcm.cpp", \
+		"Gym_Emu.cpp", \
+		"gme.cpp", \
+		"Gme_Loader.cpp", \
+		"Gme_File.cpp", \
+		"Gbs_Emu.cpp", \
+		"Gbs_Cpu.cpp", \
+		"Gbs_Core.cpp", \
+		"Gb_Oscs.cpp", \
+		"Gb_Cpu.cpp", \
+		"Gb_Apu.cpp", \
+		"fmopl.cpp", \
+		"fm2612.c", \
+		"fm.c", \
+		"Fir_Resampler.cpp", \
+		"Effects_Buffer.cpp", \
+		"Dual_Resampler.cpp", \
+		"Downsampler.cpp", \
+		"dbopl.cpp", \
+		"dac_control.c", \
+		"Classic_Emu.cpp", \
+		"c140.c", \
+		"C140_Emu.cpp", \
+		"Blip_Buffer.cpp", \
+		"blargg_errors.cpp", \
+		"blargg_common.cpp", \
+		"Ay_Emu.cpp", \
+		"Ay_Cpu.cpp", \
+		"Ay_Core.cpp", \
+		"Ay_Apu.cpp", \
+		"qmix.c", \
+		"Qsound_Apu.cpp", \
+		"Bml_Parser.cpp", \
+		"Spc_Sfm.cpp", \
+		"extra/Data_Reader.cpp", \
+	]
+
+	gme_path = 'Game_Music_Emu-git/gme'
+	gme_source_2 = map(lambda x: gme_path + '/' + x , gme_source)
+
+	bld(
+		features = ['c', 'cxx', 'cxxstlib'],
+		includes = ['../..', '../../gst-libs', gme_path + '/extra', gme_path, '.'],
+		uselib = 'STDINT GME',
+		source = gme_source_2,
+		target = 'gme',
+		install_path = bld.env['PLUGIN_INSTALL_PATH']
+	)
+

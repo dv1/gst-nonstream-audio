@@ -5,27 +5,32 @@ from waflib import Logs
 
 def configure(conf):
 	conf.env['DEFINES_DUMB'] = []
+
 	if conf.env['SSE_SUPPORTED']:
 		conf.env['DEFINES_DUMB'] += ['_USE_SSE']
+
 	if conf.env['WITH_ALLOCA']:
 		conf.env['DEFINES_DUMB'] += ['HAVE_ALLOCA_H']
-		conf.env['BUILD_DUMB'] = 1
 		conf.env['ENABLED_PLUGINS'] += ['dumb']
 	else:
 		Logs.pprint('RED', 'alloca.h not found -> cannot build DUMB decoder plugin')
 		conf.env['DISABLED_PLUGINS']['dumb'] = 'alloca.h not found'
+		return
+
 	if conf.options.enable_debug:
 		conf.env['DEFINES_DUMB'] += ['DEBUGMODE']
 
+	conf.env['DUMB_ENABLED'] = 1
+
 
 def build(bld):
-	if not bld.env['BUILD_DUMB']:
+	if not bld.env['DUMB_ENABLED']:
 		return
-	dumb_source = bld.path.ant_glob('*.c') + bld.path.ant_glob('dumb-kode54-git/dumb/src/**/*.c')
+	dumb_source = bld.path.ant_glob('*.c') + bld.path.ant_glob('dumb-git/dumb/src/**/*.c')
 	bld(
 		features = ['c', 'cshlib'],
-		includes = ['../..', '../../gst-libs', '.', 'dumb-kode54-git/dumb/include'],
-		uselib = 'GSTREAMER GSTREAMER_BASE GSTREAMER_AUDIO DUMB',
+		includes = ['../..', '../../gst-libs', '.', 'dumb-git/dumb/include', 'dumb-git'],
+		uselib = 'GSTREAMER GSTREAMER_BASE GSTREAMER_AUDIO ALLOCA DUMB',
 		use = 'gstnonstreamaudio',
 		target = 'gstdumb',
 		source = dumb_source,

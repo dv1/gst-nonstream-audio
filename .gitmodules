@@ -1,6 +1,6 @@
-[submodule "ext/dumb/dumb-kode54-git"]
-	path = ext/dumb/dumb-kode54-git
+[submodule "ext/dumb/dumb-git"]
+	path = ext/dumb/dumb-git
 	url = git://github.com/kode54/dumb.git
-[submodule "ext/gme/Game_Music_Emu-kode54-git"]
-	path = ext/gme/Game_Music_Emu-kode54-git
-	url = git://github.com/kode54/Game_Music_Emu.git
+[submodule "ext/gme/Game_Music_Emu-git"]
+	path = ext/gme/Game_Music_Emu-git
+	url = git://github.com/dv1/Game_Music_Emu.git

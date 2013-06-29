@@ -6,7 +6,7 @@
 
 #include "gstdumbdec.h"
 
-#include "dumb-kode54-git/dumb/include/internal/it.h"
+#include "dumb/include/internal/it.h"
 
 
 GST_DEBUG_CATEGORY_STATIC(dumbdec_debug);
