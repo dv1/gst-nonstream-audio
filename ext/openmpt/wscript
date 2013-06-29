@@ -1,0 +1,30 @@
+#!/usr/bin/env python
+
+from waflib import Logs
+
+
+def configure(conf):
+	conf.env['DEFINES_OPENMPT'] = ['MPT_WITH_ZLIB', 'LIBOPENMPT_BUILD', 'LIBOPENMPT_ALPHA_WARNING_SEEN_AND_I_KNOW_WHAT_I_AM_DOING']
+
+	# TODO
+	conf.env['INCLUDES_OPENMPT'] = ['']
+	conf.env['LIBPATH_OPENMPT'] = ['']
+	conf.env['LIB_OPENMPT'] = ['openmpt']
+
+	conf.env['OPENMPT_ENABLED'] = 1
+	conf.env['ENABLED_PLUGINS'] += ['openmpt']
+
+
+def build(bld):
+	if not bld.env['OPENMPT_ENABLED']:
+		return
+	bld(
+		features = ['cxx', 'cxxshlib'],
+		includes = ['../..', '../../gst-libs', '.'],
+		uselib = 'GSTREAMER GSTREAMER_BASE GSTREAMER_AUDIO OPENMPT',
+		use = 'gstnonstreamaudio',
+		target = 'gstopenmpt',
+		source = 'gstopenmptdec.c',
+		install_path = bld.env['PLUGIN_INSTALL_PATH']
+	)
+
