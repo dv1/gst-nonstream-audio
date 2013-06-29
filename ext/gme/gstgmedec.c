@@ -1,7 +1,4 @@
-#include <stdlib.h>
-#include <string.h>
 #include <config.h>
-
 #include <gst/gst.h>
 
 #include "gstgmedec.h"
@@ -150,7 +147,7 @@ static gboolean gst_gme_dec_seek(GstNonstreamAudioDecoder *dec, GstClockTime new
 static GstClockTime gst_gme_dec_tell(GstNonstreamAudioDecoder *dec)
 {
 	GstGmeDec *gme_dec = GST_GME_DEC(dec);
-	g_return_val_if_fail(gme_dec->emu != NULL, FALSE);
+	g_return_val_if_fail(gme_dec->emu != NULL, GST_CLOCK_TIME_NONE);
 
 	return (GstClockTime)(gme_tell(gme_dec->emu)) * GST_MSECOND;
 }
@@ -261,6 +258,9 @@ static gboolean gst_gme_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, GstB
 		return FALSE;
 	}
 
+	*initial_position = 0;
+	*initial_output_mode = GST_NONSTREM_AUDIO_OUTPUT_MODE_STEADY;
+
 	return TRUE;
 }
 
@@ -282,6 +282,7 @@ static gboolean gst_gme_dec_set_current_subsong(GstNonstreamAudioDecoder *dec, g
 		return FALSE;
 
 	gme_dec->cur_track = subsong;
+	*initial_position = 0;
 
 	return TRUE;
 }

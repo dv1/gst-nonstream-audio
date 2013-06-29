@@ -168,7 +168,7 @@ void gst_dumb_dec_class_init(GstDumbDecClass *klass)
 		element_class,
 		"DUMB module player",
 		"Codec/Decoder/Audio",
-		"Playes module files (MOD/S3M/XM/IT/MTM/...) using the DUMB (Dynamic Universal Music Bibliotheque) library",
+		"Plays module files (MOD/S3M/XM/IT/MTM/...) using the DUMB (Dynamic Universal Music Bibliotheque) library",
 		"Carlos Rafael Giani <dv@pseudoterminal.org>"
 	);
 }
