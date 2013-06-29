@@ -36,6 +36,10 @@ def add_compiler_flags(conf, env, flags, lang, compiler, uselib = ''):
 
 
 
+plugins = {'dumb' : True, 'gme' : False}
+
+
+
 def options(opt):
 	opt.add_option('--enable-debug', action = 'store_true', default = False, help = 'enable debug build [default: %default]')
 	opt.add_option('--with-package-name', action = 'store', default = "gstmpg123 plug-in source release", help = 'specify package name to use in plugin [default: %default]')
@@ -43,7 +47,12 @@ def options(opt):
 	opt.add_option('--plugin-install-path', action = 'store', default = "${PREFIX}/lib/gstreamer-1.0", help = 'where to install the plugin for GStreamer 1.0 [default: %default]')
 	opt.load('compiler_c')
 	opt.load('compiler_cxx')
-
+	for plugin in plugins.keys():
+		default_enabled = plugins[plugin]
+		if default_enabled:
+			opt.add_option('--disable-' + plugin, dest = plugin + '_enabled', action = 'store_false', default = True, help = 'Do not build %s plugin' % plugin)
+		else:
+			opt.add_option('--enable-' + plugin,  dest = plugin + '_enabled', action = 'store_true', default = False, help = 'Build %s plugin' % plugin)
 
 
 def configure(conf):
@@ -106,8 +115,11 @@ def configure(conf):
 	conf.env['ENABLED_PLUGINS'] = []
 	conf.env['DISABLED_PLUGINS'] = {}
 
-	conf.recurse('ext/dumb')
-	conf.recurse('ext/gme')
+	for plugin in plugins:
+		if getattr(conf.options, plugin + '_enabled'):
+			conf.recurse('ext/' + plugin)
+		else:
+			conf.env['DISABLED_PLUGINS'][plugin] = 'disabled by configuration'
 
 	conf.write_config_header('config.h')
 

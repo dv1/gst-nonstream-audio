@@ -155,7 +155,15 @@ def build(bld):
 		includes = ['../..', '../../gst-libs', gme_path + '/extra', gme_path, '.'],
 		uselib = 'STDINT GME',
 		source = gme_source_2,
-		target = 'gme',
+		target = 'gme'
+	)
+	bld(
+		features = ['c', 'cxx', 'cxxshlib'],
+		includes = ['../..', '../../gst-libs', '.', 'Game_Music_Emu-git'],
+		uselib = 'GSTREAMER GSTREAMER_BASE GSTREAMER_AUDIO',
+		use = 'gstnonstreamaudio gme',
+		target = 'gstgme',
+		source = 'gstgmedec.c',
 		install_path = bld.env['PLUGIN_INSTALL_PATH']
 	)
 
