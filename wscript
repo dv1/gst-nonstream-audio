@@ -29,10 +29,10 @@ def add_compiler_flags(conf, env, flags, lang, compiler, uselib = ''):
 			flags_pattern = lang + 'FLAGS'
 
 		if check_compiler_flag(conf, flag_candidate, compiler):
-			env.prepend_value(flags_pattern, [flag_candidate])
+			env.append_value(flags_pattern, [flag_candidate])
 		elif flag_alternative:
 			if check_compiler_flag(conf, flag_alternative, compiler):
-				env.prepend_value(flags_pattern, [flag_alternative])
+				env.append_value(flags_pattern, [flag_alternative])
 
 
 
