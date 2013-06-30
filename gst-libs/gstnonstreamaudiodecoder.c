@@ -1130,13 +1130,16 @@ static void gst_nonstream_audio_decoder_finalize(GObject *object)
 
 void gst_nonstream_audio_decoder_set_duration(GstNonstreamAudioDecoder *dec, GstClockTime duration)
 {
+	GstTagList *tags;
+
 	g_return_if_fail(GST_IS_NONSTREAM_AUDIO_DECODER(dec));
 	dec->duration = duration;
 
-	GstTagList *tags;
 	tags = gst_tag_list_new_empty();
 	gst_tag_list_add(tags, GST_TAG_MERGE_REPLACE, GST_TAG_DURATION, duration, NULL);
 	gst_pad_push_event(dec->srcpad, gst_event_new_tag(tags));
+
+	gst_element_post_message(GST_ELEMENT(dec), gst_message_new_duration_changed(GST_OBJECT(dec)));
 }
 
 
