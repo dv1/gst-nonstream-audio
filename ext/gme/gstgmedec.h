@@ -27,7 +27,6 @@ struct _GstGmeDec
 
 	gme_t *emu;
 	guint num_tracks, cur_track;
-	gme_info_t *track_info;
 };
 
 

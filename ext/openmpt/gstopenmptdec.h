@@ -27,6 +27,7 @@ struct _GstOpenMptDec
 	openmpt_module *mod;
 
 	guint cur_subsong, num_subsongs;
+	double *subsong_durations;
 	int16_t *left, *right;
 	gint sample_rate;
 };

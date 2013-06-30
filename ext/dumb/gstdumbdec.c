@@ -90,7 +90,10 @@ static gboolean gst_dumb_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, Gst
 
 static gboolean gst_dumb_dec_set_current_subsong(GstNonstreamAudioDecoder *dec, guint subsong, GstClockTime *initial_position);
 static guint gst_dumb_dec_get_current_subsong(GstNonstreamAudioDecoder *dec);
+
 static guint gst_dumb_dec_get_num_subsongs(GstNonstreamAudioDecoder *dec);
+static GstClockTime gst_dumb_dec_get_subsong_duration(GstNonstreamAudioDecoder *dec, guint subsong);
+static GstTagList* gst_dumb_dec_get_subsong_tags(GstNonstreamAudioDecoder *dec, guint subsong);
 
 static gboolean gst_dumb_dec_set_num_loops(GstNonstreamAudioDecoder *dec, gint num_loops);
 static gint gst_dumb_dec_get_num_loops(GstNonstreamAudioDecoder *dec);
@@ -138,6 +141,8 @@ void gst_dumb_dec_class_init(GstDumbDecClass *klass)
 	dec_class->set_current_subsong = GST_DEBUG_FUNCPTR(gst_dumb_dec_set_current_subsong);
 	dec_class->get_current_subsong = GST_DEBUG_FUNCPTR(gst_dumb_dec_get_current_subsong);
 	dec_class->get_num_subsongs = GST_DEBUG_FUNCPTR(gst_dumb_dec_get_num_subsongs);
+	dec_class->get_subsong_duration = GST_DEBUG_FUNCPTR(gst_dumb_dec_get_subsong_duration);
+	dec_class->get_subsong_tags = GST_DEBUG_FUNCPTR(gst_dumb_dec_get_subsong_tags);
 
 	g_object_class_install_property(
 		object_class,
@@ -526,8 +531,6 @@ static gboolean gst_dumb_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, Gst
 			return FALSE;
 	}
 
-	gst_nonstream_audio_decoder_set_duration(dec, gst_util_uint64_scale_int(dumb_dec->cur_subsong_info->length, GST_SECOND, 65536));
-
 	{
 		char const *title, *message;
 		GstTagList *tags;
@@ -571,7 +574,6 @@ static gboolean gst_dumb_dec_set_current_subsong(GstNonstreamAudioDecoder *dec, 
 		dumb_dec->cur_subsong = subsong;
 		dumb_dec->cur_subsong_info = subsong_info;
 		dumb_dec->cur_subsong_start_pos = subsong_start_pos;
-		gst_nonstream_audio_decoder_set_duration(dec, gst_util_uint64_scale_int(subsong_info->length, GST_SECOND, 65536));
 		return TRUE;
 	}
 	else
@@ -590,6 +592,22 @@ static guint gst_dumb_dec_get_num_subsongs(GstNonstreamAudioDecoder *dec)
 {
 	GstDumbDec *dumb_dec = GST_DUMB_DEC(dec);
 	return dumb_dec->num_subsongs;
+}
+
+
+static GstClockTime gst_dumb_dec_get_subsong_duration(GstNonstreamAudioDecoder *dec, guint subsong)
+{
+	gst_dumb_dec_subsong_info *subsong_info;
+	GstDumbDec *dumb_dec = GST_DUMB_DEC(dec);
+
+	subsong_info = &g_array_index(dumb_dec->subsongs, gst_dumb_dec_subsong_info, subsong);
+	return gst_util_uint64_scale_int(subsong_info->length, GST_SECOND, 65536);
+}
+
+
+static GstTagList* gst_dumb_dec_get_subsong_tags(G_GNUC_UNUSED GstNonstreamAudioDecoder *dec, G_GNUC_UNUSED guint subsong)
+{
+	return NULL;
 }
 
 

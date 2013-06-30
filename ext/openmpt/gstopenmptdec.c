@@ -52,7 +52,10 @@ static gboolean gst_openmpt_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, 
 
 static gboolean gst_openmpt_dec_set_current_subsong(GstNonstreamAudioDecoder *dec, guint subsong, GstClockTime *initial_position);
 static guint gst_openmpt_dec_get_current_subsong(GstNonstreamAudioDecoder *dec);
+
 static guint gst_openmpt_dec_get_num_subsongs(GstNonstreamAudioDecoder *dec);
+static GstClockTime gst_openmpt_dec_get_subsong_duration(GstNonstreamAudioDecoder *dec, guint subsong);
+static GstTagList* gst_openmpt_dec_get_subsong_tags(GstNonstreamAudioDecoder *dec, guint subsong);
 
 static guint gst_openmpt_dec_get_supported_output_modes(GstNonstreamAudioDecoder *dec);
 static gboolean gst_openmpt_dec_decode(GstNonstreamAudioDecoder *dec, GstBuffer **buffer, guint *num_samples);
@@ -84,6 +87,8 @@ void gst_openmpt_dec_class_init(GstOpenMptDecClass *klass)
 	dec_class->set_current_subsong = GST_DEBUG_FUNCPTR(gst_openmpt_dec_set_current_subsong);
 	dec_class->get_current_subsong = GST_DEBUG_FUNCPTR(gst_openmpt_dec_get_current_subsong);
 	dec_class->get_num_subsongs = GST_DEBUG_FUNCPTR(gst_openmpt_dec_get_num_subsongs);
+	dec_class->get_subsong_duration = GST_DEBUG_FUNCPTR(gst_openmpt_dec_get_subsong_duration);
+	dec_class->get_subsong_tags = GST_DEBUG_FUNCPTR(gst_openmpt_dec_get_subsong_tags);
 
 	gst_element_class_set_static_metadata(
 		element_class,
@@ -102,6 +107,7 @@ void gst_openmpt_dec_init(GstOpenMptDec *openmpt_dec)
 	openmpt_dec->right = g_try_malloc(NUM_SAMPLES_PER_OUTBUF * sizeof(int16_t));
 	openmpt_dec->cur_subsong = 0;
 	openmpt_dec->num_subsongs = 0;
+	openmpt_dec->subsong_durations = NULL;
 
 	if ((openmpt_dec->left == NULL) || (openmpt_dec->right == NULL))
 		GST_ELEMENT_ERROR(openmpt_dec, RESOURCE, NO_SPACE_LEFT, ("could not allocate sample buffers"), (NULL));
@@ -117,6 +123,8 @@ static void gst_openmpt_dec_finalize(GObject *object)
 
 	if (openmpt_dec->mod != NULL)
 		openmpt_module_destroy(openmpt_dec->mod);
+
+	g_free(openmpt_dec->subsong_durations);
 
 	g_free(openmpt_dec->left);
 	g_free(openmpt_dec->right);
@@ -201,12 +209,25 @@ static gboolean gst_openmpt_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, 
 	*initial_position = 0;
 	*initial_output_mode = GST_NONSTREM_AUDIO_OUTPUT_MODE_STEADY;
 
-	openmpt_module_select_subsong(openmpt_dec->mod, initial_subsong);
+	if (openmpt_dec->num_subsongs > 0)
+	{
+		guint i;
 
-	gst_nonstream_audio_decoder_set_duration(
-		GST_NONSTREAM_AUDIO_DECODER(openmpt_dec),
-		(GstClockTime)(openmpt_module_get_duration_seconds(openmpt_dec->mod) * GST_SECOND)
-	);
+		openmpt_dec->subsong_durations = g_try_malloc(openmpt_dec->num_subsongs * sizeof(double));
+		if (openmpt_dec->subsong_durations == NULL)
+		{
+			GST_ELEMENT_ERROR(openmpt_dec, RESOURCE, NO_SPACE_LEFT, ("could not allocate memory for subsong duration array"), (NULL));
+			return FALSE;
+		}
+
+		for (i = 0; i < openmpt_dec->num_subsongs; ++i)
+		{
+			openmpt_module_select_subsong(openmpt_dec->mod, i);
+			openmpt_dec->subsong_durations[i] = openmpt_module_get_duration_seconds(openmpt_dec->mod);
+		}
+	}
+
+	openmpt_module_select_subsong(openmpt_dec->mod, initial_subsong);
 
 	{
 		GstTagList *tags;
@@ -240,11 +261,6 @@ static gboolean gst_openmpt_dec_set_current_subsong(GstNonstreamAudioDecoder *de
 
 	openmpt_module_select_subsong(openmpt_dec->mod, subsong);
 
-	gst_nonstream_audio_decoder_set_duration(
-		GST_NONSTREAM_AUDIO_DECODER(openmpt_dec),
-		(GstClockTime)(openmpt_module_get_duration_seconds(openmpt_dec->mod) * GST_SECOND)
-	);
-
 	openmpt_dec->cur_subsong = subsong;
 	*initial_position = 0;
 
@@ -263,6 +279,32 @@ static guint gst_openmpt_dec_get_num_subsongs(GstNonstreamAudioDecoder *dec)
 {
 	GstOpenMptDec *openmpt_dec = GST_OPENMPT_DEC(dec);
 	return openmpt_dec->num_subsongs;
+}
+
+
+static GstClockTime gst_openmpt_dec_get_subsong_duration(GstNonstreamAudioDecoder *dec, guint subsong)
+{
+	GstOpenMptDec *openmpt_dec = GST_OPENMPT_DEC(dec);
+	return (GstClockTime)(openmpt_dec->subsong_durations[subsong] * GST_SECOND);
+}
+
+
+static GstTagList* gst_openmpt_dec_get_subsong_tags(GstNonstreamAudioDecoder *dec, guint subsong)
+{
+	GstOpenMptDec *openmpt_dec;
+	char const *name;
+	
+	openmpt_dec = GST_OPENMPT_DEC(dec);
+
+	name = openmpt_module_get_subsong_name(openmpt_dec->mod, subsong);
+	if (name != NULL)
+	{
+		GstTagList *tags = gst_tag_list_new_empty();
+		gst_tag_list_add(tags, GST_TAG_MERGE_REPLACE, "title", name, NULL);
+		return tags;
+	}
+	else
+		return NULL;
 }
 
 

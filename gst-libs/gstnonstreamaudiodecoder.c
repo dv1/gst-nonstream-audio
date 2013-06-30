@@ -13,7 +13,6 @@ enum
 {
 	PROP_0,
 	PROP_CURRENT_SUBSONG,
-	PROP_NUM_SUBSONGS,
 	PROP_NUM_LOOPS,
 	PROP_OUTPUT_MODE
 };
@@ -48,7 +47,9 @@ static gboolean gst_nonstream_audio_decoder_sinkpad_activate_mode(GstPad *pad, G
 
 static gboolean gst_nonstream_audio_decoder_get_upstream_size(GstNonstreamAudioDecoder *dec, gint64 *length);
 static gboolean gst_nonstream_audio_decoder_load(GstNonstreamAudioDecoder *dec, GstBuffer *buffer);
+static void gst_nonstream_audio_decoder_update_toc(GstNonstreamAudioDecoder *dec, GstNonstreamAudioDecoderClass *klass);
 static void gst_nonstream_audio_decoder_loop(GstNonstreamAudioDecoder *dec);
+static void gst_nonstream_audio_decoder_update_duration(GstNonstreamAudioDecoder *dec, GstClockTime duration);
 
 static gboolean gst_nonstream_audio_decoder_negotiate_default(GstNonstreamAudioDecoder *dec);
 static gboolean gst_nonstream_audio_decoder_decide_allocation_default(GstNonstreamAudioDecoder *dec, GstQuery *query);
@@ -167,18 +168,6 @@ static void gst_nonstream_audio_decoder_class_init(GstNonstreamAudioDecoderClass
 			G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS
 		)
 	);
-	g_object_class_install_property(
-		object_class,
-		PROP_NUM_SUBSONGS,
-		g_param_spec_uint(
-			"num-subsongs",
-			"Number of available subsongs",
-			"Subsongs available for playback (special values: 0 = media does not support subsongs)",
-			0, G_MAXUINT,
-			DEFAULT_NUM_SUBSONGS,
-			G_PARAM_READABLE | G_PARAM_STATIC_STRINGS
-		)
-	);
 
 	g_object_class_install_property(
 		object_class,
@@ -208,14 +197,23 @@ static void gst_nonstream_audio_decoder_class_init(GstNonstreamAudioDecoderClass
 
 	dec_class->seek = NULL;
 	dec_class->tell = NULL;
+
 	dec_class->load_from_buffer = NULL;
+
 	dec_class->get_current_subsong = NULL;
 	dec_class->set_current_subsong = NULL;
+
 	dec_class->get_num_subsongs = NULL;
+	dec_class->get_subsong_duration = NULL;
+	dec_class->get_subsong_tags = NULL;
+
 	dec_class->set_num_loops = NULL;
 	dec_class->get_num_loops = NULL;
+
 	dec_class->decode = NULL;
+
 	dec_class->negotiate = GST_DEBUG_FUNCPTR(gst_nonstream_audio_decoder_negotiate_default);
+
 	dec_class->decide_allocation = GST_DEBUG_FUNCPTR(gst_nonstream_audio_decoder_decide_allocation_default);
 	dec_class->propose_allocation = GST_DEBUG_FUNCPTR(gst_nonstream_audio_decoder_propose_allocation_default);
 }
@@ -230,7 +228,7 @@ static void gst_nonstream_audio_decoder_init(GstNonstreamAudioDecoder *dec, GstN
 	dec->num_decoded = 0;
 
 	dec->initial_subsong = 0;
-	dec->num_subsongs = DEFAULT_NUM_SUBSONGS;
+	dec->toc = NULL;
 
 	dec->loaded = FALSE;
 
@@ -693,6 +691,7 @@ static gboolean gst_nonstream_audio_decoder_load(GstNonstreamAudioDecoder *dec, 
 	gboolean module_ok;
 	GstClockTime initial_position;
 	GstNonstreamAudioDecoderClass *dec_class;
+	GstClockTime duration;
 
 	GST_LOG_OBJECT(dec, "Read %u bytes from upstream", gst_buffer_get_size(buffer));
 
@@ -708,17 +707,93 @@ static gboolean gst_nonstream_audio_decoder_load(GstNonstreamAudioDecoder *dec, 
 		return FALSE;
 	}
 
+	if (dec_class->get_current_subsong != NULL)
+		dec->initial_subsong = dec_class->get_current_subsong(dec);
+
+	if (dec_class->get_subsong_duration != NULL)
+	{
+		duration = dec_class->get_subsong_duration(dec, dec->initial_subsong);
+		gst_nonstream_audio_decoder_update_duration(dec, duration);
+	}
+	else
+		duration = GST_CLOCK_TIME_NONE;
+
+	if (dec_class->get_subsong_tags != NULL)
+	{
+		GstTagList *tags = dec_class->get_subsong_tags(dec, dec->initial_subsong);
+		if (tags != NULL)
+			gst_pad_push_event(dec->srcpad, gst_event_new_tag(tags));
+	}
+
+	gst_nonstream_audio_decoder_update_toc(dec, dec_class);
+
 	gst_segment_init(&(dec->cur_segment), GST_FORMAT_TIME);
 	dec->cur_segment.start = initial_position;
 	dec->cur_segment.time = initial_position;
-	dec->cur_segment.stop = (dec->output_mode == GST_NONSTREM_AUDIO_OUTPUT_MODE_STEADY) ? ((GstClockTime)(-1)) : dec->duration;
-	dec->cur_segment.duration = (dec->output_mode == GST_NONSTREM_AUDIO_OUTPUT_MODE_STEADY) ? ((GstClockTime)(-1)) : dec->duration;
+	dec->cur_segment.stop = (dec->output_mode == GST_NONSTREM_AUDIO_OUTPUT_MODE_STEADY) ? GST_CLOCK_TIME_NONE : duration;
+	dec->cur_segment.duration = (dec->output_mode == GST_NONSTREM_AUDIO_OUTPUT_MODE_STEADY) ? GST_CLOCK_TIME_NONE : duration;
 	dec->offset = gst_util_uint64_scale_int(initial_position, dec->audio_info.rate, GST_SECOND);
 	gst_pad_push_event(dec->srcpad, gst_event_new_segment(&(dec->cur_segment)));
 
 	dec->loaded = TRUE;
 
 	return TRUE;
+}
+
+
+static void gst_nonstream_audio_decoder_update_toc(GstNonstreamAudioDecoder *dec, GstNonstreamAudioDecoderClass *klass)
+{
+	guint num_subsongs, i;
+	gboolean update = FALSE;
+
+	if (dec->toc != NULL)
+	{
+		gst_toc_unref(dec->toc);
+		dec->toc = NULL;
+		update = TRUE;
+	}
+
+	if ((klass->get_num_subsongs == NULL) || ((num_subsongs = klass->get_num_subsongs(dec)) <= 1))
+		return;
+
+	dec->toc = gst_toc_new(GST_TOC_SCOPE_GLOBAL);
+
+	for (i = 0; i < num_subsongs; ++i)
+	{
+		gchar *uid;
+		GstTocEntry *entry;
+		GstClockTime duration;
+		GstTagList *tags;
+		
+		uid = g_strdup_printf("%u", i);
+		entry = gst_toc_entry_new(GST_TOC_ENTRY_TYPE_TITLE, uid);
+
+		/* TODO: combine this with looping */
+		duration = (klass->get_subsong_duration != NULL) ? klass->get_subsong_duration(dec, i) : GST_CLOCK_TIME_NONE;
+		tags = (klass->get_subsong_tags != NULL) ? klass->get_subsong_tags(dec, i) : (GstTagList*)NULL;
+
+		/* TOC does not allow GST_CLOCK_TIME_NONE as a stop value */
+		if (duration == GST_CLOCK_TIME_NONE)
+			duration = G_MAXINT64;
+
+		gst_toc_entry_set_start_stop_times(entry, 0, duration);
+		gst_toc_entry_set_tags(entry, tags);
+
+		GST_DEBUG_OBJECT(
+			dec,
+			"new toc entry: uid: \"%s\" duration: %" GST_TIME_FORMAT " tags: %" GST_PTR_FORMAT,
+			uid,
+			GST_TIME_ARGS(duration),
+			tags
+		);
+
+		gst_toc_append_entry(dec->toc, entry);
+
+		g_free(uid);
+	}
+
+	gst_pad_push_event(dec->srcpad, gst_event_new_toc(dec->toc, update));
+	gst_message_new_toc(GST_OBJECT(dec), dec->toc, update);
 }
 
 
@@ -792,7 +867,7 @@ static void gst_nonstream_audio_decoder_loop(GstNonstreamAudioDecoder *dec)
 				num_samples,
 				GST_TIME_ARGS(GST_BUFFER_DURATION(outbuf)),
 				dec->offset,
-				GST_BUFFER_TIMESTAMP(outbuf)
+				GST_TIME_ARGS(GST_BUFFER_TIMESTAMP(outbuf))
 			);
 
 			if (G_UNLIKELY(dec->discont))
@@ -989,8 +1064,9 @@ static void gst_nonstream_audio_decoder_set_property(GObject *object, guint prop
 						dec->cur_segment.base = gst_util_uint64_scale_int(dec->num_decoded, GST_SECOND, dec->audio_info.rate);
 						dec->cur_segment.start = cur_position;
 						dec->cur_segment.time = cur_position;
-						dec->cur_segment.stop = (dec->output_mode == GST_NONSTREM_AUDIO_OUTPUT_MODE_STEADY) ? ((GstClockTime)(-1)) : dec->duration;
-						dec->cur_segment.duration = (dec->output_mode == GST_NONSTREM_AUDIO_OUTPUT_MODE_STEADY) ? ((GstClockTime)(-1)) : dec->duration;
+						dec->offset = gst_util_uint64_scale_int(cur_position, dec->audio_info.rate, GST_SECOND);
+						dec->cur_segment.stop = (dec->output_mode == GST_NONSTREM_AUDIO_OUTPUT_MODE_STEADY) ? GST_CLOCK_TIME_NONE : dec->duration;
+						dec->cur_segment.duration = (dec->output_mode == GST_NONSTREM_AUDIO_OUTPUT_MODE_STEADY) ? GST_CLOCK_TIME_NONE : dec->duration;
 						dec->offset = gst_util_uint64_scale_int(cur_position, dec->audio_info.rate, GST_SECOND);
 						gst_pad_push_event(dec->srcpad, gst_event_new_segment(&(dec->cur_segment)));
 
@@ -1015,11 +1091,27 @@ static void gst_nonstream_audio_decoder_set_property(GObject *object, guint prop
 					GstClockTime new_position;
 					if (klass->set_current_subsong(dec, new_subsong, &new_position))
 					{
+						if (klass->get_subsong_duration != NULL)
+						{
+							GstClockTime duration = klass->get_subsong_duration(dec, new_subsong);
+							gst_nonstream_audio_decoder_update_duration(dec, duration);
+						}
+
 						dec->cur_segment.base = gst_util_uint64_scale_int(dec->num_decoded, GST_SECOND, dec->audio_info.rate);
 						dec->cur_segment.start = new_position;
 						dec->cur_segment.time = new_position;
 						dec->offset = gst_util_uint64_scale_int(new_position, dec->audio_info.rate, GST_SECOND);
-						gst_pad_push_event(dec->srcpad, gst_event_new_segment(&(dec->cur_segment)));							
+						dec->cur_segment.stop = (dec->output_mode == GST_NONSTREM_AUDIO_OUTPUT_MODE_STEADY) ? GST_CLOCK_TIME_NONE : dec->duration;
+						dec->cur_segment.duration = (dec->output_mode == GST_NONSTREM_AUDIO_OUTPUT_MODE_STEADY) ? GST_CLOCK_TIME_NONE : dec->duration;
+
+						gst_pad_push_event(dec->srcpad, gst_event_new_segment(&(dec->cur_segment)));
+
+						if (klass->get_subsong_tags != NULL)
+						{
+							GstTagList *tags = klass->get_subsong_tags(dec, new_subsong);
+							if (tags != NULL)
+								gst_pad_push_event(dec->srcpad, gst_event_new_tag(tags));
+						}
 					}
 					else
 						GST_WARNING_OBJECT(dec, "switching to new subsong %u failed", new_subsong);
@@ -1080,19 +1172,6 @@ static void gst_nonstream_audio_decoder_get_property(GObject *object, guint prop
 			GST_NONSTREAM_AUDIO_DECODER_STREAM_UNLOCK(dec);
 			break;
 		}
-		case PROP_NUM_SUBSONGS:
-		{
-			GST_NONSTREAM_AUDIO_DECODER_STREAM_LOCK(dec);
-			if (klass->get_num_subsongs != NULL)
-				g_value_set_uint(value, klass->get_num_subsongs(dec));
-			else
-			{
-				GST_INFO_OBJECT(dec, "cannot get number of subsongs - get_num_subsongs is NULL -> returning 0 as number of subsongs");
-				g_value_set_uint(value, 0);
-			}
-			GST_NONSTREAM_AUDIO_DECODER_STREAM_UNLOCK(dec);
-			break;
-		}
 		case PROP_NUM_LOOPS:
 		{
 			GST_NONSTREAM_AUDIO_DECODER_STREAM_LOCK(dec);
@@ -1124,20 +1203,21 @@ static void gst_nonstream_audio_decoder_finalize(GObject *object)
 
 	g_rec_mutex_clear(&(dec->stream_lock));
 
+	if (dec->toc != NULL)
+		gst_toc_unref(dec->toc);
+
 	G_OBJECT_CLASS(gst_nonstream_audio_decoder_parent_class)->finalize(object);
 }
 
 
-void gst_nonstream_audio_decoder_set_duration(GstNonstreamAudioDecoder *dec, GstClockTime duration)
+static void gst_nonstream_audio_decoder_update_duration(GstNonstreamAudioDecoder *dec, GstClockTime duration)
 {
 	GstTagList *tags;
-
-	g_return_if_fail(GST_IS_NONSTREAM_AUDIO_DECODER(dec));
-	dec->duration = duration;
 
 	tags = gst_tag_list_new_empty();
 	gst_tag_list_add(tags, GST_TAG_MERGE_REPLACE, GST_TAG_DURATION, duration, NULL);
 	gst_pad_push_event(dec->srcpad, gst_event_new_tag(tags));
+	dec->duration = duration;
 
 	gst_element_post_message(GST_ELEMENT(dec), gst_message_new_duration_changed(GST_OBJECT(dec)));
 }
@@ -1167,16 +1247,6 @@ void gst_nonstream_audio_decoder_handle_loop(GstNonstreamAudioDecoder *dec, GstC
 	dec->cur_segment.time = new_position;
 	dec->offset = gst_util_uint64_scale_int(new_position, dec->audio_info.rate, GST_SECOND);
 	gst_pad_push_event(dec->srcpad, gst_event_new_segment(&(dec->cur_segment)));	
-	GST_NONSTREAM_AUDIO_DECODER_STREAM_UNLOCK(dec);
-}
-
-
-void gst_nonstream_audio_decoder_set_num_subsongs(GstNonstreamAudioDecoder *dec, guint num_subsongs)
-{
-	g_return_if_fail(GST_IS_NONSTREAM_AUDIO_DECODER(dec));
-	GST_NONSTREAM_AUDIO_DECODER_STREAM_LOCK(dec);
-	dec->num_subsongs = num_subsongs;
-	GST_DEBUG_OBJECT(dec, "number of subsongs set to %u", num_subsongs);
 	GST_NONSTREAM_AUDIO_DECODER_STREAM_UNLOCK(dec);
 }
 

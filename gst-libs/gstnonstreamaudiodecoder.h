@@ -100,7 +100,8 @@ struct _GstNonstreamAudioDecoder
 	guint64 offset, num_decoded;
 	GstSegment cur_segment;
 
-	guint initial_subsong, num_subsongs;
+	guint initial_subsong;
+	GstToc *toc;
 
 	gboolean loaded;
 
@@ -159,6 +160,10 @@ struct _GstNonstreamAudioDecoder
  *                              (the entire song is then considered to be one single subsong). 1 also means that only
  *                              this very media has no or just one subsong, and the decoder itself can
  *                              support multiple subsongs.
+ * @get_subsong_duration:       Optional.
+ *                              Returns the duration of a subsong. Returns GST_CLOCK_TIME_NONE if duration is unknown.
+ * @get_subsong_tags:           Optional.
+ *                              Returns tags for a subsong. Returns NULL if there are no tags.
  * @set_num_loops:              Optional.
  *                              Sets the number of loops for playback. If this is called during playback,
  *                              the subclass must set any internal loop counters to zero. A loop value of -1
@@ -216,7 +221,10 @@ struct _GstNonstreamAudioDecoderClass
 
 	gboolean (*set_current_subsong)(GstNonstreamAudioDecoder *dec, guint subsong, GstClockTime *initial_position);
 	guint (*get_current_subsong)(GstNonstreamAudioDecoder *dec);
+
 	guint (*get_num_subsongs)(GstNonstreamAudioDecoder *dec);
+	GstClockTime (*get_subsong_duration)(GstNonstreamAudioDecoder *dec, guint subsong);
+	GstTagList* (*get_subsong_tags)(GstNonstreamAudioDecoder *dec, guint subsong);
 
 	gboolean (*set_num_loops)(GstNonstreamAudioDecoder *dec, gint num_loops);
 	gint (*get_num_loops)(GstNonstreamAudioDecoder *dec);
@@ -236,7 +244,6 @@ struct _GstNonstreamAudioDecoderClass
 GType gst_nonstream_audio_decoder_get_type(void);
 
 
-void gst_nonstream_audio_decoder_set_duration(GstNonstreamAudioDecoder *dec, GstClockTime duration);
 void gst_nonstream_audio_decoder_handle_loop(GstNonstreamAudioDecoder *dec, GstClockTime new_position);
 
 gboolean gst_nonstream_audio_decoder_set_output_audioinfo(GstNonstreamAudioDecoder *dec, GstAudioInfo const *info);

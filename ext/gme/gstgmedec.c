@@ -52,13 +52,17 @@ static void gst_gme_dec_finalize(GObject *object);
 static gboolean gst_gme_dec_seek(GstNonstreamAudioDecoder *dec, GstClockTime new_position);
 static GstClockTime gst_gme_dec_tell(GstNonstreamAudioDecoder *dec);
 
-static gboolean gst_gme_dec_update_track_info(GstGmeDec *gme_dec, guint track_nr);
+static GstTagList* gst_gme_dec_tags_from_track_info(GstGmeDec *gme_dec, guint track_nr);
+static GstClockTime gst_gme_dec_duration_from_track_info(GstGmeDec *gme_dec, guint track_nr);
 
 static gboolean gst_gme_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, GstBuffer *source_data, guint initial_subsong, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode);
 
 static gboolean gst_gme_dec_set_current_subsong(GstNonstreamAudioDecoder *dec, guint subsong, GstClockTime *initial_position);
 static guint gst_gme_dec_get_current_subsong(GstNonstreamAudioDecoder *dec);
+
 static guint gst_gme_dec_get_num_subsongs(GstNonstreamAudioDecoder *dec);
+static GstClockTime gst_gme_dec_get_subsong_duration(GstNonstreamAudioDecoder *dec, guint subsong);
+static GstTagList* gst_gme_dec_get_subsong_tags(GstNonstreamAudioDecoder *dec, guint subsong);
 
 static gboolean gst_gme_dec_set_num_loops(GstNonstreamAudioDecoder *dec, gint num_loops);
 static gint gst_gme_dec_get_num_loops(GstNonstreamAudioDecoder *dec);
@@ -95,6 +99,8 @@ void gst_gme_dec_class_init(GstGmeDecClass *klass)
 	dec_class->set_current_subsong = GST_DEBUG_FUNCPTR(gst_gme_dec_set_current_subsong);
 	dec_class->get_current_subsong = GST_DEBUG_FUNCPTR(gst_gme_dec_get_current_subsong);
 	dec_class->get_num_subsongs = GST_DEBUG_FUNCPTR(gst_gme_dec_get_num_subsongs);
+	dec_class->get_subsong_duration = GST_DEBUG_FUNCPTR(gst_gme_dec_get_subsong_duration);
+	dec_class->get_subsong_tags = GST_DEBUG_FUNCPTR(gst_gme_dec_get_subsong_tags);
 
 	gst_element_class_set_static_metadata(
 		element_class,
@@ -111,7 +117,6 @@ void gst_gme_dec_init(GstGmeDec *gme_dec)
 	gme_dec->emu = NULL;
 	gme_dec->cur_track = 0;
 	gme_dec->num_tracks = 0;
-	gme_dec->track_info = NULL;
 }
 
 
@@ -153,49 +158,56 @@ static GstClockTime gst_gme_dec_tell(GstNonstreamAudioDecoder *dec)
 }
 
 
-static gboolean gst_gme_dec_update_track_info(GstGmeDec *gme_dec, guint track_nr)
+static GstTagList* gst_gme_dec_tags_from_track_info(GstGmeDec *gme_dec, guint track_nr)
 {
+	GstTagList *tags;
 	gme_err_t err;
+	gme_info_t *track_info;
 
 	g_return_val_if_fail(gme_dec->emu != NULL, FALSE);
 
-	err = gme_track_info(gme_dec->emu, &(gme_dec->track_info), track_nr);
+	tags = NULL;
+
+	err = gme_track_info(gme_dec->emu, &track_info, track_nr);
 	if (G_UNLIKELY(err != NULL))
 	{
 		GST_ERROR_OBJECT(gme_dec, "error while trying to get track information: %s", err);
-		return FALSE;
+		return NULL;
 	}
 
-	gst_nonstream_audio_decoder_set_duration(
-		GST_NONSTREAM_AUDIO_DECODER(gme_dec),
-		(GstClockTime)(gme_dec->track_info->play_length) * GST_MSECOND
-	);
-
-	{
-		GstTagList *tags;
-		gme_info_t *info;
-
-		tags = gst_tag_list_new_empty();
-		info = gme_dec->track_info;
+	tags = gst_tag_list_new_empty();
 
 #define GME_ADD_TO_TAGS(INFO_FIELD, TAG_TYPE) \
-		if (info->INFO_FIELD && *info->INFO_FIELD) \
-			gst_tag_list_add(tags, GST_TAG_MERGE_REPLACE, (TAG_TYPE), info->INFO_FIELD, NULL);
+	if (track_info->INFO_FIELD && *(track_info->INFO_FIELD)) \
+		gst_tag_list_add(tags, GST_TAG_MERGE_REPLACE, (TAG_TYPE), track_info->INFO_FIELD, NULL);
 
-		GME_ADD_TO_TAGS(system, GST_TAG_ENCODER);
-		GME_ADD_TO_TAGS(game, GST_TAG_ALBUM);
-		GME_ADD_TO_TAGS(song, GST_TAG_TITLE);
-		GME_ADD_TO_TAGS(author, GST_TAG_ARTIST);
-		GME_ADD_TO_TAGS(copyright, GST_TAG_COPYRIGHT);
-		GME_ADD_TO_TAGS(comment, GST_TAG_COMMENT);
-		GME_ADD_TO_TAGS(dumper, GST_TAG_CONTACT);
+	GME_ADD_TO_TAGS(system, GST_TAG_ENCODER);
+	GME_ADD_TO_TAGS(game, GST_TAG_ALBUM);
+	GME_ADD_TO_TAGS(song, GST_TAG_TITLE);
+	GME_ADD_TO_TAGS(author, GST_TAG_ARTIST);
+	GME_ADD_TO_TAGS(copyright, GST_TAG_COPYRIGHT);
+	GME_ADD_TO_TAGS(comment, GST_TAG_COMMENT);
+	GME_ADD_TO_TAGS(dumper, GST_TAG_CONTACT);
 
 #undef GME_ADD_TO_TAGS
 
-		gst_pad_push_event(GST_NONSTREAM_AUDIO_DECODER_SRC_PAD(gme_dec), gst_event_new_tag(tags));
+	return tags;
+}
+
+
+static GstClockTime gst_gme_dec_duration_from_track_info(GstGmeDec *gme_dec, guint track_nr)
+{
+	gme_err_t err;
+	gme_info_t *track_info;
+
+	err = gme_track_info(gme_dec->emu, &track_info, track_nr);
+	if (G_UNLIKELY(err != NULL))
+	{
+		GST_ERROR_OBJECT(gme_dec, "error while trying to get track information: %s", err);
+		return GST_CLOCK_TIME_NONE;
 	}
 
-	return TRUE;
+	return (GstClockTime)(track_info->play_length) * GST_MSECOND;
 }
 
 
@@ -248,9 +260,6 @@ static gboolean gst_gme_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, GstB
 
 	GST_INFO_OBJECT(gme_dec, "%d track(s) (= subsong(s)) available", gme_dec->num_tracks);
 
-	if (!gst_gme_dec_update_track_info(gme_dec, initial_subsong))
-		return FALSE;
-
 	err = gme_start_track(gme_dec->emu, initial_subsong);
 	if (G_UNLIKELY(err != NULL))
 	{
@@ -278,9 +287,6 @@ static gboolean gst_gme_dec_set_current_subsong(GstNonstreamAudioDecoder *dec, g
 		return FALSE;
 	}
 
-	if (!gst_gme_dec_update_track_info(gme_dec, subsong))
-		return FALSE;
-
 	gme_dec->cur_track = subsong;
 	*initial_position = 0;
 
@@ -299,6 +305,18 @@ static guint gst_gme_dec_get_num_subsongs(GstNonstreamAudioDecoder *dec)
 {
 	GstGmeDec *gme_dec = GST_GME_DEC(dec);
 	return gme_dec->num_tracks;
+}
+
+
+static GstClockTime gst_gme_dec_get_subsong_duration(GstNonstreamAudioDecoder *dec, guint subsong)
+{
+	return gst_gme_dec_duration_from_track_info(GST_GME_DEC(dec), subsong);
+}
+
+
+static GstTagList* gst_gme_dec_get_subsong_tags(GstNonstreamAudioDecoder *dec, guint subsong)
+{
+	return gst_gme_dec_tags_from_track_info(GST_GME_DEC(dec), subsong);
 }
 
 
