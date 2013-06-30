@@ -4,15 +4,11 @@ from waflib import Logs
 
 
 def configure(conf):
-	conf.env['DEFINES_OPENMPT'] = ['MPT_WITH_ZLIB', 'LIBOPENMPT_BUILD', 'LIBOPENMPT_ALPHA_WARNING_SEEN_AND_I_KNOW_WHAT_I_AM_DOING']
-
-	# TODO
-	conf.env['INCLUDES_OPENMPT'] = ['']
-	conf.env['LIBPATH_OPENMPT'] = ['']
-	conf.env['LIB_OPENMPT'] = ['openmpt']
-
-	conf.env['OPENMPT_ENABLED'] = 1
-	conf.env['ENABLED_PLUGINS'] += ['openmpt']
+	if conf.check_cfg(package = 'libopenmpt', uselib_store = 'OPENMPT', args = '--cflags --libs', mandatory = 0):
+		conf.env['OPENMPT_ENABLED'] = 1
+		conf.env['ENABLED_PLUGINS'] += ['openmpt']
+	else:
+		conf.env['DISABLED_PLUGINS']['openmpt'] = 'could not find libopenmpt'
 
 
 def build(bld):
@@ -25,6 +21,7 @@ def build(bld):
 		use = 'gstnonstreamaudio',
 		target = 'gstopenmpt',
 		source = 'gstopenmptdec.c',
+		defines = ['LIBOPENMPT_ALPHA_WARNING_SEEN_AND_I_KNOW_WHAT_I_AM_DOING'],
 		install_path = bld.env['PLUGIN_INSTALL_PATH']
 	)
 
