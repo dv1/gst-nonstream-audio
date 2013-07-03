@@ -33,7 +33,7 @@ Available plugins
 * gmedec : video game music decoder using the Game Music Emulator library. As with DUMB, an
   improved version is used. However, even though it works just fine, it is currently disabled
   because it requires some fixes to the GME fork (which, like DUMB, is contained as a git submodule).
-* openmpt : module music decoder using libopenmpt, a library version of [OpenMPT](http://sourceforge.net/projects/modplug/).
+* openmpt : module music decoder using libopenmpt, a library version of [OpenMPT](http://openmpt.org/).
   libopenmpt is part of an extensive OpenMPT refactoring, and thus has an unstable API at the moment.
   For this reason, this plugin is disabled by default (works fine though).
 
