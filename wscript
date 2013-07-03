@@ -36,7 +36,7 @@ def add_compiler_flags(conf, env, flags, lang, compiler, uselib = ''):
 
 
 
-plugins = {'dumb' : True, 'gme' : False, 'openmpt' : False}
+plugins = {'dumb' : True, 'gme' : True, 'openmpt' : False}
 
 
 
@@ -138,7 +138,7 @@ def configure(conf):
 def build(bld):
 	nonstreamaudio_source = bld.srcnode.ant_glob('gst-libs/*.c')
 	bld(
-		features = ['c', 'cstlib'],  # TODO: change it back to cshlib
+		features = ['c', 'cshlib'],
 		includes = ['.', 'gst-libs'],
 		uselib = 'GSTREAMER GSTREAMER_BASE GSTREAMER_AUDIO',
 		target = 'gstnonstreamaudio',

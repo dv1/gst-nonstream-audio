@@ -31,11 +31,11 @@ Available plugins
   not work correctly with the original; however, this codebase contains the improved version as a
   git submodule.
 * gmedec : video game music decoder using the Game Music Emulator library. As with DUMB, an
-  improved version is used. However, even though it works just fine, it is currently disabled
-  because it requires some fixes to the GME fork (which, like DUMB, is contained as a git submodule).
+  improved fork is used.
 * openmpt : module music decoder using libopenmpt, a library version of [OpenMPT](http://openmpt.org/).
   libopenmpt is part of an extensive OpenMPT refactoring, and thus has an unstable API at the moment.
-  For this reason, this plugin is disabled by default (works fine though).
+  It works fine, but may not build with coming libopenmpt versions due to the unstable API. For this
+  reason, it is disabled by default (use `--enable-openmpt` with `./waf configure` below).
 
 
 How to build
@@ -50,11 +50,6 @@ Then, execute this line:
 
     ./waf configure
 
-or this one if you want to have the plugins installed somewhere else (default is $PREFIX/lib/gstreamer-1.0):
-
-    ./waf configure --plugin-install-path=<path/to/target/location>
-
-GStreamer 1.0 typically uses `$HOME/.local/share/gstreamer-1.0/plugins/ ` for local plugins.
 To build and install after configuring, simply run:
 
     ./waf
@@ -63,8 +58,4 @@ To build and install after configuring, simply run:
 Now there should be a `dumbdec` plugin. To check, run:
 
     gst-inspect-1.0 dumbdec
-
-**NOTE:** currently, there may be linking problems if more than plugin is installed and in GStreamer's registry
-at the same time. The reason for this is that GstNonstreamAudioDecoder is inside a static library, which causes
-class collisions between plugins. This will be fixed soon. You have been warned about this software's alpha status...!
 
