@@ -171,6 +171,7 @@ static GstTagList* gst_gme_dec_tags_from_track_info(GstGmeDec *gme_dec, guint tr
 	err = gme_track_info(gme_dec->emu, &track_info, track_nr);
 	if (G_UNLIKELY(err != NULL))
 	{
+		gme_free_info(track_info);
 		GST_ERROR_OBJECT(gme_dec, "error while trying to get track information: %s", err);
 		return NULL;
 	}
@@ -191,6 +192,8 @@ static GstTagList* gst_gme_dec_tags_from_track_info(GstGmeDec *gme_dec, guint tr
 
 #undef GME_ADD_TO_TAGS
 
+	gme_free_info(track_info);
+
 	return tags;
 }
 
@@ -199,15 +202,30 @@ static GstClockTime gst_gme_dec_duration_from_track_info(GstGmeDec *gme_dec, gui
 {
 	gme_err_t err;
 	gme_info_t *track_info;
+	GstClockTime duration;
 
 	err = gme_track_info(gme_dec->emu, &track_info, track_nr);
 	if (G_UNLIKELY(err != NULL))
 	{
 		GST_ERROR_OBJECT(gme_dec, "error while trying to get track information: %s", err);
-		return GST_CLOCK_TIME_NONE;
+		duration = GST_CLOCK_TIME_NONE;
+	}
+	else
+	{
+		GST_DEBUG_OBJECT(
+			gme_dec,
+			"track info length stats:  length: %d  intro length: %d  loop length: %d  play length: %d",
+			track_info->length,
+			track_info->intro_length,
+			track_info->loop_length,
+			track_info->play_length
+		);
+		duration = (GstClockTime)(track_info->play_length) * GST_MSECOND;
 	}
 
-	return (GstClockTime)(track_info->play_length) * GST_MSECOND;
+	gme_free_info(track_info);
+
+	return duration;
 }
 
 
