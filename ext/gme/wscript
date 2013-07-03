@@ -144,15 +144,15 @@ def build(bld):
 		"Qsound_Apu.cpp", \
 		"Bml_Parser.cpp", \
 		"Spc_Sfm.cpp", \
-		"extra/Data_Reader.cpp", \
 	]
 
 	gme_path = 'Game_Music_Emu-git/gme'
 	gme_source_2 = map(lambda x: gme_path + '/' + x , gme_source)
+	gme_source_2 += ['extra/Data_Reader.cpp']
 
 	bld(
 		features = ['c', 'cxx', 'cxxstlib'],
-		includes = ['../..', '../../gst-libs', gme_path + '/extra', gme_path, '.'],
+		includes = ['../..', '../../gst-libs', gme_path, '.', 'extra'],
 		uselib = 'STDINT GME',
 		source = gme_source_2,
 		target = 'gme'
