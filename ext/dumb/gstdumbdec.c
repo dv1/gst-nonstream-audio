@@ -515,22 +515,13 @@ static gboolean gst_dumb_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, Gst
 	}
 
 	/* Set output format */
-	{
-		GstAudioInfo audio_info;
-
-		gst_audio_info_init(&audio_info);
-
-		gst_audio_info_set_format(
-			&audio_info,
-			GST_AUDIO_FORMAT_S16,
-			dumb_dec->sample_rate,
-			dumb_dec->num_channels,
-			NULL
-		);
-
-		if (!gst_nonstream_audio_decoder_set_output_audioinfo(dec, &audio_info))
-			return FALSE;
-	}
+	if (!gst_nonstream_audio_decoder_set_output_audioinfo_simple(
+		dec,
+		dumb_dec->sample_rate,
+		GST_AUDIO_FORMAT_S16,
+		dumb_dec->num_channels
+	))
+		return FALSE;
 
 	{
 		char const *title, *message;

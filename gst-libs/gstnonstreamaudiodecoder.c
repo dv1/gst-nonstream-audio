@@ -1483,6 +1483,24 @@ done:
 }
 
 
+gboolean gst_nonstream_audio_decoder_set_output_audioinfo_simple(GstNonstreamAudioDecoder *dec, guint sample_rate, GstAudioFormat sample_format, guint num_channels)
+{
+	GstAudioInfo audio_info;
+
+	gst_audio_info_init(&audio_info);
+
+	gst_audio_info_set_format(
+		&audio_info,
+		sample_format,
+		sample_rate,
+		num_channels,
+		NULL
+	);
+
+	return gst_nonstream_audio_decoder_set_output_audioinfo(dec, &audio_info);
+}
+
+
 gboolean gst_nonstream_audio_decoder_negotiate(GstNonstreamAudioDecoder *dec)
 {
 	GstNonstreamAudioDecoderClass *klass;

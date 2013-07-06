@@ -242,22 +242,13 @@ static gboolean gst_gme_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, GstB
 	gst_nonstream_audio_decoder_get_downstream_info(dec, NULL, &sample_rate, NULL);
 
 	/* Set output format */
-	{
-		GstAudioInfo audio_info;
-
-		gst_audio_info_init(&audio_info);
-
-		gst_audio_info_set_format(
-			&audio_info,
-			GST_AUDIO_FORMAT_S16,
-			sample_rate,
-			2,
-			NULL
-		);
-
-		if (!gst_nonstream_audio_decoder_set_output_audioinfo(dec, &audio_info))
-			return FALSE;
-	}
+	if (!gst_nonstream_audio_decoder_set_output_audioinfo_simple(
+		dec,
+		sample_rate,
+		GST_AUDIO_FORMAT_S16,
+		2
+	))
+		return FALSE;
 
 	gst_buffer_map(source_data, &map, GST_MAP_READ);
 	err = gme_open_data(map.data, map.size, &(gme_dec->emu), sample_rate);

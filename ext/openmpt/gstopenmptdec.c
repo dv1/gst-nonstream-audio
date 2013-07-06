@@ -169,22 +169,13 @@ static gboolean gst_openmpt_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, 
 	gst_nonstream_audio_decoder_get_downstream_info(dec, NULL, &(openmpt_dec->sample_rate), NULL);
 
 	/* Set output format */
-	{
-		GstAudioInfo audio_info;
-
-		gst_audio_info_init(&audio_info);
-
-		gst_audio_info_set_format(
-			&audio_info,
-			GST_AUDIO_FORMAT_S16,
-			openmpt_dec->sample_rate,
-			2,
-			NULL
-		);
-
-		if (!gst_nonstream_audio_decoder_set_output_audioinfo(dec, &audio_info))
-			return FALSE;
-	}
+	if (!gst_nonstream_audio_decoder_set_output_audioinfo_simple(
+		dec,
+		openmpt_dec->sample_rate,
+		GST_AUDIO_FORMAT_S16,
+		2
+	))
+		return FALSE;
 
 	gst_buffer_map(source_data, &map, GST_MAP_READ);
 	openmpt_dec->mod = openmpt_module_create_from_memory(map.data, map.size, gst_openmpt_dec_log_func, dec);

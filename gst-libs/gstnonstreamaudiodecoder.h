@@ -286,6 +286,7 @@ GType gst_nonstream_audio_decoder_get_type(void);
 void gst_nonstream_audio_decoder_handle_loop(GstNonstreamAudioDecoder *dec, GstClockTime new_position);
 
 gboolean gst_nonstream_audio_decoder_set_output_audioinfo(GstNonstreamAudioDecoder *dec, GstAudioInfo const *info);
+gboolean gst_nonstream_audio_decoder_set_output_audioinfo_simple(GstNonstreamAudioDecoder *dec, guint sample_rate, GstAudioFormat sample_format, guint num_channels);
 gboolean gst_nonstream_audio_decoder_negotiate(GstNonstreamAudioDecoder *dec);
 void gst_nonstream_audio_decoder_get_downstream_info(GstNonstreamAudioDecoder *dec, GstAudioFormat *format, gint *sample_rate, gint *num_channels);
 
