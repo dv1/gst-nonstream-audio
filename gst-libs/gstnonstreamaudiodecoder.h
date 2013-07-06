@@ -33,6 +33,17 @@ typedef struct _GstNonstreamAudioDecoder GstNonstreamAudioDecoder;
 typedef struct _GstNonstreamAudioDecoderClass GstNonstreamAudioDecoderClass;
 
 
+/**
+ * GstNonstreamAudioOutputMode:
+ * @GST_NONSTREM_AUDIO_OUTPUT_MODE_LOOPING: Playback position is moved back to the beginning of the loop
+ * @GST_NONSTREM_AUDIO_OUTPUT_MODE_STEADY: Playback position increases steadily, even when looping
+ * @GST_NONSTREM_AUDIO_OUTPUT_MODE_UNDEFINED: Behavior upon looping is undefined
+ *
+ * The output mode defines how the output behaves with regards to looping. Either the playback position is
+ * moved back to the beginning of the loop, acting like a backwards seek, or it increases steadily, as if
+ * loop were "unrolled". GST_NONSTREM_AUDIO_OUTPUT_MODE_UNDEFINED is valid only as an initial internal
+ * output mode state; from the outside, only LOOPING and STEADY can be set.
+ */
 typedef enum
 {
 	GST_NONSTREM_AUDIO_OUTPUT_MODE_LOOPING = 0,
@@ -96,26 +107,52 @@ struct _GstNonstreamAudioDecoder
 	/* source and sink pads */
 	GstPad *sinkpad, *srcpad;
 
+	/* duration of the current subsong */
 	GstClockTime duration;
+
+	/* offset (in samples) and number of decoded samples
+	 * The difference between these two values is: offset is used for the
+	 * GstBuffer offsets, while num_decoded is used for the segment base
+	 * time values.
+	 * offset is reset after seeking, looping (when output mode is LOOPING)
+	 * and switching subsongs, while num_decoded is only reset to 0 after
+	 * seeking (because seeking alters the pipeline's base_time).
+	 */
 	guint64 offset, num_decoded;
+	/* currently playing segment */
 	GstSegment cur_segment;
 
+	/* the subsong initially set
+	 * This value is ignored after the media has been loaded. Before,
+	 * it is set by the _init() and the set_property() functions. It is
+	 * mainly used to cover the case when the current-subsong property is
+	 * defined right from the start, and the media isn't loaded yet.
+	 */
 	guint initial_subsong;
+	/* table of contents
+	 * A simple table of contents, each subsong being represented by an
+	 * entry. If there are <=1 subsongs , no table is used, and toc is NULL.
+	 */
 	GstToc *toc;
 
 	gboolean loaded;
 
 	GstNonstreamAudioOutputMode output_mode;
 
+	/* output audio information, set by set_output_audioinfo() */
 	GstAudioInfo audio_info;
 	gboolean output_format_changed;
+
+	/* if this is true, the next buffer will have its DISCONT flag enabled,
+	 * and discont is set to FALSE afterwards again */
 	gboolean discont;
 
 	GstAllocator *allocator;
 	GstAllocationParams allocation_params;
 
+	/* these two values are used in push mode only, for loading */
 	GstAdapter *adapter;
-	gint64 upstream_size; /* used in push mode only */
+	gint64 upstream_size;
 
 	GRecMutex stream_lock;
 };
@@ -139,6 +176,8 @@ struct _GstNonstreamAudioDecoder
  *                              can also make use of a suggested initial subsong and initial
  *                              playback position (but isn't required to). In case it chooses a different starting
  *                              position, the function must pass this position to *initial_position.
+ *                              The subclass does not have to unref the input buffer; the base class does that
+ *                              already.
  * @set_current_subsong:        Optional.
  *                              Sets the current subsong. This function is allowed to switch to a different
  *                              subsong than the required one, and can optionally make use of the suggested initial
@@ -204,7 +243,7 @@ struct _GstNonstreamAudioDecoder
  * needed. At minimum, @load_from_buffer, @get_supported_output_modes, and @decode need
  * to be overridden.
  *
- * These functions (with the obvious exception of @load_from_buffer) only need to be functional
+ * These functions (with the exception of @load_from_buffer) only need to be functional
  * after the media was loaded, since the base class will not call them before.
  */
 struct _GstNonstreamAudioDecoderClass

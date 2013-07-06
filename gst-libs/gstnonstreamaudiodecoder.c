@@ -4,6 +4,169 @@
 
 #include "gstnonstreamaudiodecoder.h"
 
+/**
+ * SECTION:gstnonstreamaudiodecoder
+ * @short_description: Base class for decoding of non-streaming audio
+ *
+ * This base class is for decoders which do not operate on a streaming model.
+ * That is: they load the encoded media at once, as part of an initialization,
+ * and afterwards can decode samples (sometimes referred to as "rendering the
+ * samples").
+ *
+ * This sets it apart from GstAudioDecoder, which is a base class for
+ * streaming audio decoders.
+ *
+ * The base class is conceptually a mix between decoder and parser. This is
+ * unavoidable, since virtually no format that isn't streaming based has a
+ * clear distinction between parsing and decoding. As a result, this class
+ * also handles seeking.
+ *
+ * Non-streaming audio formats tend to have some characteristics unknown to
+ * more "regular" bitstreams. These include subsongs and looping.
+ *
+ * Subsongs are a set of songs-within-a-song. An analogy would be a multitrack
+ * recording, where each track is its own song. The first subsong is typically
+ * the "main" one. Subsongs were popular for video games to enable context-
+ * aware music; for example, subsong #0 would be the "main" song, #1 would be
+ * an alternate song playing when a fight started, #2 would be heard during
+ * conversations etc. The base class is designed to always have subsongs. If
+ * the subclass doesn't provide any, the base class creates a pseudo subsong.
+ * This "subsong" is actually the whole song.
+ * Downstream is informed about the subsong using a table of contents (TOC),
+ * but only if there are at least 2 subsongs.
+ *
+ * Looping refers to jumps within the song, typically backwards to the loop
+ * start (although bi-directional looping is possible). The loop is defined
+ * by a chronological start and end; once the playback position reaches the
+ * loop end, it jumps back to the loop start.
+ * Depending on the subclass, looping may not be possible at all, or it
+ * may only be possible to enable/disable it (that is, either no looping, or
+ * an infinite amount of loops), or it may allow for defining a finite number
+ * of times the loop is repeated.
+ * Looping can affect output in two ways. Either, the playback position is
+ * reset to the start of the loop, similar to what happens after a seek event.
+ * Or, it is not reset, so the pipeline sees playback steadily moving forwards,
+ * the playback position monotonically increasing. However, seeking must
+ * always happen within the confines of the defined subsong duration; for
+ * example, if a subsong is 2 minutes long, steady playback is at 5 minutes
+ * (because infinite looping is enabled), then it must not be possible to seek
+ * past the 2 minute mark.
+ *
+ * If the initial subsong and loop count are set to values the subclass does
+ * not support, the subclass has a chance to correct these values.
+ * @get_property then reports the corrected versions.
+ *
+ * The base class operates as follows:
+ * <orderedlist>
+ * <listitem>
+ *   <itemizedlist><title>Unloaded mode</title>
+ *     <listitem><para>
+ *       Initial values are set. If a current subsong has already been
+ *       defined (for example over the command line with gst-launch), then
+ *       the subsong index is copied over to initial_subsong .
+ *       Same goes for the num-loops property.
+ *       Media is NOT loaded yet.
+ *     </para></listitem>
+ *     <listitem><para>
+ *       Once the sinkpad is activated, the process continues. If the sinkpad
+ *       is activated in push mode, the class accumulates the incoming media
+ *       data in an adapter inside the sinkpad's chain function until either an
+ *       EOS event is received from upstream, or the number of bytes reported
+ *       by upstream is reached. Then it loads the media, and starts the decoder
+ *       loop task.
+ *       If the sinkpad is activated in pull mode, it starts the task; inside
+ *       the decoder loop, it pulls the entire data from upstream at once.
+ *     <listitem><para>
+ *       In both cases, if upstream cannot respond to the size query (in bytes)
+ *       of @load_from_buffer fails, an error is reported, and the pipeline
+ *       stops.
+ *     </para></listitem>
+ *     <listitem><para>
+ *       Also, in both cases, if there are no errors, @load_from_buffer is
+ *       called to load the media. The subclass must at least call
+ *       @gst_nonstream_audio_decoder_set_output_audioinfo there, and is free
+ *       to make use of the initial subsong, output mode, and position. If the
+ *       actual output mode or position differs from the initial value,
+ *       it must set the initial value to the actual one (for example, if the
+ *       actual starting position is always 0, set *initial_position to 0).
+ *       If loading is unsuccessful, an error is reported, and the pipeline
+ *       stops. Otherwise, the base class @get_current_subsong to retrieve
+ *       the actual current subsong, @get_subsong_duration to report the current
+ *       subsong's duration in a duration event and message, and @get_subsong_tags
+ *       to send tags downstream in an event (these functions are optional; if
+ *       set to NULL, the associated operation is skipped). Afterwards, the base
+ *       class switches to loaded mode.
+ *     </para></listitem>
+ *   </itemizedlist>
+ *   <itemizedlist><title>Loaded mode</title>
+ *     <listitem><para>
+ *       Inside the decoder loop task, the base class repeatedly calls @decode,
+ *       which returns a buffer with decoded, ready-to-play samples. If the
+ *       subclass reached the end of playback, @decode returns FALSE, otherwise
+ *       TRUE.
+ *     </para></listitem>
+ *     <listitem><para>
+ *       Upon reaching a loop end, subclass either ignores that, or loops back
+ *       to the beginning of the loop. In the latter case, if the output mode is
+ *       set to LOOPING, the subclass must call @gst_nonstream_audio_decoder_handle_loop
+ *       *after* the playback position moved to the start of the loop. In
+ *       STEADY mode, the subclass must not call this function.
+ *       Since many decoders only provide a callback for when the looping occurs,
+ *       and that looping occurs inside the decoding operation itself, this
+ *       mechanism for subclass is suggested: set a flag inside such a callback.
+ *       Then, in the next @decode call, before doing the decoding, this flag is
+ *       checked; if it is set, @gst_nonstream_audio_decoder_handle_loop is
+ *       called, and the flag is cleared.
+ *       (This function call is necessary in LOOPING mode because it updates the
+ *       current segment and makes sure the next buffer that is sent downstream
+ *       has its DISCONT flag set.)
+ *     </para></listitem>
+ *     <listitem><para>
+ *       When the current subsong is switched, @set_current_subsong is called.
+ *       If it fails, a warning is reported, and nothing else is done. Otherwise,
+ *       it calls @get_subsong_duration to get the new current subsongs's
+ *       duration, @get_subsong_tags to get its tags, reports a new duration
+ *       (i.e. it sends a duration event downstream and generates a duration
+ *       message), updates the current segment, and sends the subsong's tags in
+ *       an event downstream. (If @set_current_subsong has been set to NULL by
+ *       the subclass, attempts to set a current subsong are ignored; likewise,
+ *       if @get_subsong_duration is NULL, no duration is reported, and if
+ *       @get_subsong_tags is NULL, no tags are sent downstream.)
+ *     </para></listitem>
+ *     <listitem><para>
+ *       When an attempt is made to switch the output mode, it is checked against
+ *       the bitmask returned by @get_supported_output_modes. If the proposed
+ *       new output mode is supported, the current segment is updated
+ *       (it is open-ended in STEADY mode, and covers the (sub)song length in
+ *       LOOPING mode), and the subclass' @set_output_mode function is called
+ *       unless it is set to NULL. Subclasses should reset internal loop counters
+ *       in this function.
+ *     </para></listitem>
+ *   </itemizedlist>
+ * </listitem>
+ * </orderedlist>
+ *
+ * The relationship between (sub)song duration, output mode, and number of loops
+ * is defined this way (this is all done by the base class automatically):
+ * <itemizedlist>
+ * <listitem><para>
+ *   Segments have their duration and stop values set to GST_CLOCK_TIME_NONE in
+ *   STEADY mode, and to the duration of the (sub)song in LOOPING mode.
+ * </para></listitem>
+ * <listitem><para>
+ *   The duration that is returned to a DURATION query is always the duration
+ *   of the (sub)song, regardless of number of loops or output mode. The same
+ *   goes for DURATION messages and tags.
+ * </para></listitem>
+ * <listitem><para>
+ *   If the number of loops is >0 or -1, durations of TOC entries are set to
+ *   the duration of the respective subsong in LOOPING mode and to G_MAXINT64 in
+ *   STEADY mode. If the number of loops is 0, entry durations are set to the
+ *   subsong duration regardless of the output mode.
+ * </para></listitem>
+ * </itemizedlist>
+ */
+
 
 GST_DEBUG_CATEGORY (nonstream_audiodecoder_debug);
 #define GST_CAT_DEFAULT nonstream_audiodecoder_debug
@@ -50,6 +213,7 @@ static gboolean gst_nonstream_audio_decoder_load(GstNonstreamAudioDecoder *dec, 
 static void gst_nonstream_audio_decoder_update_toc(GstNonstreamAudioDecoder *dec, GstNonstreamAudioDecoderClass *klass);
 static void gst_nonstream_audio_decoder_loop(GstNonstreamAudioDecoder *dec);
 static void gst_nonstream_audio_decoder_update_duration(GstNonstreamAudioDecoder *dec, GstClockTime duration);
+static void gst_nonstream_audio_decoder_update_cur_segment(GstNonstreamAudioDecoder *dec, GstClockTime start_position, gboolean set_stop_and_duration);
 
 static gboolean gst_nonstream_audio_decoder_negotiate_default(GstNonstreamAudioDecoder *dec);
 static gboolean gst_nonstream_audio_decoder_decide_allocation_default(GstNonstreamAudioDecoder *dec, GstQuery *query);
@@ -296,6 +460,12 @@ static gboolean gst_nonstream_audio_decoder_sink_event(GstPad *pad, GstObject *p
 		{
 			gsize avail_size;
 			GstBuffer *adapter_buffer;
+
+			/* If media has already been loaded, then the decoder task has been started;
+			 * the EOS event can be ignored */
+			if (dec->loaded)
+				return TRUE;
+
 			avail_size = gst_adapter_available(dec->adapter);
 			adapter_buffer = gst_adapter_take_buffer(dec->adapter, avail_size);
 
@@ -310,6 +480,7 @@ static gboolean gst_nonstream_audio_decoder_sink_event(GstPad *pad, GstObject *p
 }
 
 
+/* This function is used when the sink pad activates in push mode */
 static GstFlowReturn gst_nonstream_audio_decoder_chain(GstPad *pad, GstObject *parent, GstBuffer *buffer)
 {
 	GstNonstreamAudioDecoder *dec = GST_NONSTREAM_AUDIO_DECODER(parent);
@@ -318,18 +489,21 @@ static GstFlowReturn gst_nonstream_audio_decoder_chain(GstPad *pad, GstObject *p
 	{
 		if (!gst_nonstream_audio_decoder_get_upstream_size(dec, &(dec->upstream_size)))
 		{
-			GST_ELEMENT_ERROR(dec, STREAM, DECODE, (NULL), ("Cannot load - upstream size (in bytes) cannot be determined"));
+			GST_ELEMENT_ERROR(dec, STREAM, DECODE, (NULL), ("Cannot load - upstream size (in bytes) could not be determined"));
 			return GST_FLOW_ERROR;
 		}
 	}
 
-	/* Accumulate GME data until end-of-stream or the upstream size is reached, then commence playback. */
 	if (dec->loaded)
 	{
+		/* Media is already loaded - discard any incoming buffers, since they are not needed */
+
 		gst_buffer_unref(buffer);
 	}
 	else
 	{
+		/* Accumulate data until end-of-stream or the upstream size is reached, then load media and commence playback. */
+
 		gint64 avail_size;
 
 		gst_adapter_push(dec->adapter, buffer);
@@ -707,6 +881,12 @@ static gboolean gst_nonstream_audio_decoder_load(GstNonstreamAudioDecoder *dec, 
 		return FALSE;
 	}
 
+	if (!GST_AUDIO_INFO_IS_VALID(&(dec->audio_info)))
+	{
+		GST_ELEMENT_ERROR(dec, STREAM, DECODE, (NULL), ("Audio info is invalid after loading"));
+		return FALSE;
+	}
+
 	if (dec_class->get_current_subsong != NULL)
 		dec->initial_subsong = dec_class->get_current_subsong(dec);
 
@@ -728,12 +908,7 @@ static gboolean gst_nonstream_audio_decoder_load(GstNonstreamAudioDecoder *dec, 
 	gst_nonstream_audio_decoder_update_toc(dec, dec_class);
 
 	gst_segment_init(&(dec->cur_segment), GST_FORMAT_TIME);
-	dec->cur_segment.start = initial_position;
-	dec->cur_segment.time = initial_position;
-	dec->cur_segment.stop = (dec->output_mode == GST_NONSTREM_AUDIO_OUTPUT_MODE_STEADY) ? GST_CLOCK_TIME_NONE : duration;
-	dec->cur_segment.duration = (dec->output_mode == GST_NONSTREM_AUDIO_OUTPUT_MODE_STEADY) ? GST_CLOCK_TIME_NONE : duration;
-	dec->offset = gst_util_uint64_scale_int(initial_position, dec->audio_info.rate, GST_SECOND);
-	gst_pad_push_event(dec->srcpad, gst_event_new_segment(&(dec->cur_segment)));
+	gst_nonstream_audio_decoder_update_cur_segment(dec, initial_position, TRUE);
 
 	dec->loaded = TRUE;
 
@@ -797,7 +972,13 @@ static void gst_nonstream_audio_decoder_update_toc(GstNonstreamAudioDecoder *dec
 }
 
 
-/* NOTE: not to be confused with song loops - this function is the looping srcpad task */
+/* NOTE: not to be confused with song loops - this function is the looping srcpad task
+ * There are four possibilities for when this task is started:
+ * 1. sinkpad runs in push mode, and the chain function starts this task after it loaded the media
+ * 2. sinkpad is activated in pull mode
+ * 3. EOS event is reached
+ * 4. A seek event occurs
+ */
 static void gst_nonstream_audio_decoder_loop(GstNonstreamAudioDecoder *dec)
 {
 	GstNonstreamAudioDecoderClass *dec_class;
@@ -805,6 +986,10 @@ static void gst_nonstream_audio_decoder_loop(GstNonstreamAudioDecoder *dec)
 
 	if (!dec->loaded)
 	{
+		/* This branch is only reached in pull mode; in push mode, the media is loaded
+		 * first (inside the chain function), and then this task is started, so
+		 * it cannot reach this branch then */
+
 		gint64 size;
 		GstBuffer *buffer;
 		GstFlowReturn flow;
@@ -813,7 +998,7 @@ static void gst_nonstream_audio_decoder_loop(GstNonstreamAudioDecoder *dec)
 
 		if (!gst_nonstream_audio_decoder_get_upstream_size(dec, &size))
 		{
-			GST_ELEMENT_ERROR(dec, STREAM, DECODE, (NULL), ("Cannot load - upstream size (in bytes) cannot be determined"));
+			GST_ELEMENT_ERROR(dec, STREAM, DECODE, (NULL), ("Cannot load - upstream size (in bytes) could not be determined"));
 			goto pause;
 		}
 
@@ -1061,15 +1246,7 @@ static void gst_nonstream_audio_decoder_set_property(GObject *object, guint prop
 
 					if (proceed)
 					{
-						dec->cur_segment.base = gst_util_uint64_scale_int(dec->num_decoded, GST_SECOND, dec->audio_info.rate);
-						dec->cur_segment.start = cur_position;
-						dec->cur_segment.time = cur_position;
-						dec->offset = gst_util_uint64_scale_int(cur_position, dec->audio_info.rate, GST_SECOND);
-						dec->cur_segment.stop = (dec->output_mode == GST_NONSTREM_AUDIO_OUTPUT_MODE_STEADY) ? GST_CLOCK_TIME_NONE : dec->duration;
-						dec->cur_segment.duration = (dec->output_mode == GST_NONSTREM_AUDIO_OUTPUT_MODE_STEADY) ? GST_CLOCK_TIME_NONE : dec->duration;
-						dec->offset = gst_util_uint64_scale_int(cur_position, dec->audio_info.rate, GST_SECOND);
-						gst_pad_push_event(dec->srcpad, gst_event_new_segment(&(dec->cur_segment)));
-
+						gst_nonstream_audio_decoder_update_cur_segment(dec, cur_position, TRUE);
 						dec->output_mode = new_output_mode;
 					}
 				}
@@ -1097,14 +1274,7 @@ static void gst_nonstream_audio_decoder_set_property(GObject *object, guint prop
 							gst_nonstream_audio_decoder_update_duration(dec, duration);
 						}
 
-						dec->cur_segment.base = gst_util_uint64_scale_int(dec->num_decoded, GST_SECOND, dec->audio_info.rate);
-						dec->cur_segment.start = new_position;
-						dec->cur_segment.time = new_position;
-						dec->offset = gst_util_uint64_scale_int(new_position, dec->audio_info.rate, GST_SECOND);
-						dec->cur_segment.stop = (dec->output_mode == GST_NONSTREM_AUDIO_OUTPUT_MODE_STEADY) ? GST_CLOCK_TIME_NONE : dec->duration;
-						dec->cur_segment.duration = (dec->output_mode == GST_NONSTREM_AUDIO_OUTPUT_MODE_STEADY) ? GST_CLOCK_TIME_NONE : dec->duration;
-
-						gst_pad_push_event(dec->srcpad, gst_event_new_segment(&(dec->cur_segment)));
+						gst_nonstream_audio_decoder_update_cur_segment(dec, new_position, TRUE);
 
 						if (klass->get_subsong_tags != NULL)
 						{
@@ -1223,6 +1393,23 @@ static void gst_nonstream_audio_decoder_update_duration(GstNonstreamAudioDecoder
 }
 
 
+static void gst_nonstream_audio_decoder_update_cur_segment(GstNonstreamAudioDecoder *dec, GstClockTime start_position, gboolean set_stop_and_duration)
+{
+	dec->cur_segment.base = gst_util_uint64_scale_int(dec->num_decoded, GST_SECOND, dec->audio_info.rate);
+	dec->cur_segment.start = start_position;
+	dec->cur_segment.time = start_position;
+	dec->offset = gst_util_uint64_scale_int(start_position, dec->audio_info.rate, GST_SECOND);
+	if (set_stop_and_duration)
+	{
+		gboolean open_ended = (dec->output_mode == GST_NONSTREM_AUDIO_OUTPUT_MODE_STEADY);
+		dec->cur_segment.stop = open_ended ? GST_CLOCK_TIME_NONE : dec->duration;
+		dec->cur_segment.duration = open_ended ? GST_CLOCK_TIME_NONE : dec->duration;
+	}
+
+	gst_pad_push_event(dec->srcpad, gst_event_new_segment(&(dec->cur_segment)));	
+}
+
+
 void gst_nonstream_audio_decoder_handle_loop(GstNonstreamAudioDecoder *dec, GstClockTime new_position)
 {
 	/* NOTE: handle_loop must be called AFTER the last samples of the loop have been decoded and pushed downstream */
@@ -1242,11 +1429,7 @@ void gst_nonstream_audio_decoder_handle_loop(GstNonstreamAudioDecoder *dec, GstC
 	GST_DEBUG_OBJECT(dec, "handle_loop() invoked with new_position = %" GST_TIME_FORMAT, GST_TIME_ARGS(new_position));
 
 	GST_NONSTREAM_AUDIO_DECODER_STREAM_LOCK(dec);
-	dec->cur_segment.base = gst_util_uint64_scale_int(dec->num_decoded, GST_SECOND, dec->audio_info.rate);
-	dec->cur_segment.start = new_position;
-	dec->cur_segment.time = new_position;
-	dec->offset = gst_util_uint64_scale_int(new_position, dec->audio_info.rate, GST_SECOND);
-	gst_pad_push_event(dec->srcpad, gst_event_new_segment(&(dec->cur_segment)));	
+	gst_nonstream_audio_decoder_update_cur_segment(dec, new_position, FALSE);
 	GST_NONSTREAM_AUDIO_DECODER_STREAM_UNLOCK(dec);
 }
 
