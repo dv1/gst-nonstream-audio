@@ -27,6 +27,9 @@ struct _GstGmeDec
 
 	gme_t *emu;
 	guint num_tracks, cur_track;
+
+	gdouble echo, stereo_separation;
+	gboolean enable_effects, enable_surround;
 };
 
 

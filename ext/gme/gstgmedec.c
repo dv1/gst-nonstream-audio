@@ -8,6 +8,22 @@ GST_DEBUG_CATEGORY_STATIC(gmedec_debug);
 #define GST_CAT_DEFAULT gmedec_debug
 
 
+enum
+{
+	PROP_0,
+	PROP_ECHO,
+	PROP_STEREO_SEPARATION,
+	PROP_ENABLE_EFFECTS,
+	PROP_ENABLE_SURROUND
+};
+
+
+#define DEFAULT_ECHO               0.2
+#define DEFAULT_STEREO_SEPARATION  0.2
+#define DEFAULT_ENABLE_EFFECTS     FALSE
+#define DEFAULT_ENABLE_SURROUND    TRUE
+
+
 
 static GstStaticPadTemplate sink_template = GST_STATIC_PAD_TEMPLATE(
 	"sink",
@@ -49,6 +65,9 @@ G_DEFINE_TYPE(GstGmeDec, gst_gme_dec, GST_TYPE_NONSTREAM_AUDIO_DECODER)
 
 static void gst_gme_dec_finalize(GObject *object);
 
+static void gst_gme_dec_set_property(GObject *object, guint prop_id, const GValue *value, GParamSpec *pspec);
+static void gst_gme_dec_get_property(GObject *object, guint prop_id, GValue *value, GParamSpec *pspec);
+
 static gboolean gst_gme_dec_seek(GstNonstreamAudioDecoder *dec, GstClockTime new_position);
 static GstClockTime gst_gme_dec_tell(GstNonstreamAudioDecoder *dec);
 
@@ -56,6 +75,8 @@ static GstTagList* gst_gme_dec_tags_from_track_info(GstGmeDec *gme_dec, guint tr
 static GstClockTime gst_gme_dec_duration_from_track_info(GstGmeDec *gme_dec, guint track_nr);
 
 static gboolean gst_gme_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, GstBuffer *source_data, guint initial_subsong, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode);
+
+static void gst_gme_dec_update_effects(GstGmeDec *gme_dec);
 
 static gboolean gst_gme_dec_set_current_subsong(GstNonstreamAudioDecoder *dec, guint subsong, GstClockTime *initial_position);
 static guint gst_gme_dec_get_current_subsong(GstNonstreamAudioDecoder *dec);
@@ -88,6 +109,8 @@ void gst_gme_dec_class_init(GstGmeDecClass *klass)
 	gst_element_class_add_pad_template(element_class, gst_static_pad_template_get(&src_template));
 
 	object_class->finalize = GST_DEBUG_FUNCPTR(gst_gme_dec_finalize);
+	object_class->set_property = GST_DEBUG_FUNCPTR(gst_gme_dec_set_property);
+	object_class->get_property = GST_DEBUG_FUNCPTR(gst_gme_dec_get_property);
 
 	dec_class->seek = GST_DEBUG_FUNCPTR(gst_gme_dec_seek);
 	dec_class->tell = GST_DEBUG_FUNCPTR(gst_gme_dec_tell);
@@ -101,6 +124,53 @@ void gst_gme_dec_class_init(GstGmeDecClass *klass)
 	dec_class->get_num_subsongs = GST_DEBUG_FUNCPTR(gst_gme_dec_get_num_subsongs);
 	dec_class->get_subsong_duration = GST_DEBUG_FUNCPTR(gst_gme_dec_get_subsong_duration);
 	dec_class->get_subsong_tags = GST_DEBUG_FUNCPTR(gst_gme_dec_get_subsong_tags);
+
+	g_object_class_install_property(
+		object_class,
+		PROP_ECHO,
+		g_param_spec_double(
+			"echo",
+			"Amount of echo",
+			"Amount of echo to apply; 0.0 = none  1.0 = maximum (has no effect on GYM,SPC,VGM music)",
+			0.0, 1.0,
+			DEFAULT_ECHO,
+			G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS
+		)
+	);
+	g_object_class_install_property(
+		object_class,
+		PROP_STEREO_SEPARATION,
+		g_param_spec_double(
+			"stereo-separation",
+			"Stereo separation",
+			"Stereo separation strength; 0.0 = none (mono)  1.0 = hard left/right separation (has no effect on GYM,SPC,VGM music)",
+			0.0, 1.0,
+			DEFAULT_STEREO_SEPARATION,
+			G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS
+		)
+	);
+	g_object_class_install_property(
+		object_class,
+		PROP_ENABLE_EFFECTS,
+		g_param_spec_boolean(
+			"enable-effects",
+			"Enable postprocessing effects",
+			"Enable postprocessing effects (stereo separation, echo, surround; has no effect on GYM,SPC,VGM music)",
+			DEFAULT_ENABLE_EFFECTS,
+			G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS
+		)
+	);
+	g_object_class_install_property(
+		object_class,
+		PROP_ENABLE_SURROUND,
+		g_param_spec_boolean(
+			"enable-surround",
+			"Enable surround",
+			"Enable a fake surround sound by phase-inverting some channels (has no effect on GYM,SPC,VGM music)",
+			DEFAULT_ENABLE_SURROUND,
+			G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS
+		)
+	);
 
 	gst_element_class_set_static_metadata(
 		element_class,
@@ -117,6 +187,11 @@ void gst_gme_dec_init(GstGmeDec *gme_dec)
 	gme_dec->emu = NULL;
 	gme_dec->cur_track = 0;
 	gme_dec->num_tracks = 0;
+
+	gme_dec->echo = DEFAULT_ECHO;
+	gme_dec->stereo_separation = DEFAULT_STEREO_SEPARATION;
+	gme_dec->enable_effects = DEFAULT_ENABLE_EFFECTS;
+	gme_dec->enable_surround = DEFAULT_ENABLE_SURROUND;
 }
 
 
@@ -129,6 +204,88 @@ static void gst_gme_dec_finalize(GObject *object)
 
 	if (gme_dec->emu != NULL)
 		gme_delete(gme_dec->emu);
+}
+
+
+static void gst_gme_dec_set_property(GObject *object, guint prop_id, const GValue *value, GParamSpec *pspec)
+{
+	GstNonstreamAudioDecoder *dec;
+	GstGmeDec *gme_dec;
+
+	dec = GST_NONSTREAM_AUDIO_DECODER(object);
+	gme_dec = GST_GME_DEC(dec);
+
+	switch (prop_id)
+	{
+		case PROP_ECHO:
+		case PROP_STEREO_SEPARATION:
+		case PROP_ENABLE_EFFECTS:
+		case PROP_ENABLE_SURROUND:
+		{
+			GST_NONSTREAM_AUDIO_DECODER_STREAM_LOCK(dec);
+
+			switch (prop_id)
+			{
+				case PROP_ECHO:
+					gme_dec->echo = g_value_get_double(value);
+					break;
+				case PROP_STEREO_SEPARATION:
+					gme_dec->stereo_separation = g_value_get_double(value);
+					break;
+				case PROP_ENABLE_EFFECTS:
+					gme_dec->enable_effects = g_value_get_boolean(value);
+					break;
+				case PROP_ENABLE_SURROUND:
+					gme_dec->enable_surround = g_value_get_boolean(value);
+					break;
+				default:
+					break;
+			}
+
+			gst_gme_dec_update_effects(gme_dec);
+
+			GST_NONSTREAM_AUDIO_DECODER_STREAM_UNLOCK(dec);
+		}
+		default:
+			break;
+	}
+}
+
+
+static void gst_gme_dec_get_property(GObject *object, guint prop_id, GValue *value, GParamSpec *pspec)
+{
+	GstGmeDec *gme_dec = GST_GME_DEC(object);
+
+	switch (prop_id)
+	{
+		case PROP_ECHO:
+		case PROP_STEREO_SEPARATION:
+		case PROP_ENABLE_EFFECTS:
+		case PROP_ENABLE_SURROUND:
+		{
+			switch (prop_id)
+			{
+				case PROP_ECHO:
+					g_value_set_double(value, gme_dec->echo);
+					break;
+				case PROP_STEREO_SEPARATION:
+					g_value_set_double(value, gme_dec->stereo_separation);
+					break;
+				case PROP_ENABLE_EFFECTS:
+					g_value_set_boolean(value, gme_dec->enable_effects);
+					break;
+				case PROP_ENABLE_SURROUND:
+					g_value_set_boolean(value, gme_dec->enable_surround);
+					break;
+				default:
+					break;
+			}
+
+			break;
+		}
+		default:
+			break;
+	}
 }
 
 
@@ -279,7 +436,25 @@ static gboolean gst_gme_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, GstB
 	*initial_position = 0;
 	*initial_output_mode = GST_NONSTREM_AUDIO_OUTPUT_MODE_STEADY;
 
+	gst_gme_dec_update_effects(gme_dec);
+
 	return TRUE;
+}
+
+
+static void gst_gme_dec_update_effects(GstGmeDec *gme_dec)
+{
+	gme_effects_t effects;
+
+	if (gme_dec->emu == NULL)
+		return;
+
+	gme_effects(gme_dec->emu, &effects);
+	effects.echo = gme_dec->echo;
+	effects.stereo = gme_dec->stereo_separation;
+	effects.enabled = gme_dec->enable_effects;
+	effects.surround = gme_dec->enable_surround;
+	gme_set_effects(gme_dec->emu, &effects);
 }
 
 
