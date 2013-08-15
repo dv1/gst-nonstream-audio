@@ -4,13 +4,10 @@ from waflib import Logs
 
 
 def configure(conf):
-	conf.env['ENABLED_PLUGINS'] += ['umxparse']
-	conf.env['UMXPARSE_ENABLED'] = 1
+	pass
 
 
 def build(bld):
-	if not bld.env['UMXPARSE_ENABLED']:
-		return
 	source = bld.path.ant_glob('*.c')
 	bld(
 		features = ['c', 'cshlib'],

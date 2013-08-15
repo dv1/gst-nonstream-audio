@@ -36,7 +36,7 @@ def add_compiler_flags(conf, env, flags, lang, compiler, uselib = ''):
 
 
 
-plugins = {'dumb' : True, 'gme' : True, 'openmpt' : False, 'umxparse' : True}
+plugins = {'dumb' : True, 'gme' : True, 'openmpt' : False}
 
 
 
@@ -115,6 +115,8 @@ def configure(conf):
 	conf.env['ENABLED_PLUGINS'] = []
 	conf.env['DISABLED_PLUGINS'] = {}
 
+	conf.recurse('gst/umxparse')
+
 	for plugin in plugins:
 		if getattr(conf.options, plugin + '_enabled'):
 			conf.recurse('ext/' + plugin)
@@ -145,6 +147,8 @@ def build(bld):
 		name = 'gstnonstreamaudio',
 		source = nonstreamaudio_source
 	)
+
+	bld.recurse('gst/umxparse')
 
 	for plugin in bld.env['ENABLED_PLUGINS']:
 		bld.recurse('ext/' + plugin)
