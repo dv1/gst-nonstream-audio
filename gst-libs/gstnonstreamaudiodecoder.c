@@ -513,9 +513,9 @@ static GstFlowReturn gst_nonstream_audio_decoder_chain(GstPad *pad, GstObject *p
 			GstBuffer *adapter_buffer = gst_adapter_take_buffer(dec->adapter, avail_size);
 
 			if (!gst_nonstream_audio_decoder_load(dec, adapter_buffer))
-				return FALSE;
+				return GST_FLOW_ERROR;
 
-			return gst_pad_start_task(pad, (GstTaskFunction)gst_nonstream_audio_decoder_loop, parent, NULL);
+			return gst_pad_start_task(pad, (GstTaskFunction)gst_nonstream_audio_decoder_loop, parent, NULL) ? GST_FLOW_OK : GST_FLOW_ERROR;
 		}
 	}
 
