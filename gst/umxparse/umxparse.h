@@ -24,7 +24,7 @@ struct _GstUmxParse
 
 	GstPad *sinkpad, *srcpad;
 
-	gboolean loaded, upstream_eos;
+	gboolean upstream_eos;
 	gint64 module_data_size;
 
 	/* these two values are used in push mode only, for loading */

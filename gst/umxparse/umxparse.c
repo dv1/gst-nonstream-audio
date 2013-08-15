@@ -84,7 +84,6 @@ void gst_umx_parse_class_init(GstUmxParseClass *klass)
 
 void gst_umx_parse_init(GstUmxParse *umx_parse)
 {
-	umx_parse->loaded = FALSE;
 	umx_parse->upstream_eos = FALSE;
 	umx_parse->module_data_size = 0;
 
@@ -135,6 +134,8 @@ static GstFlowReturn gst_umx_parse_chain(G_GNUC_UNUSED GstPad *pad, GstObject *p
 {
 	GstUmxParse *umx_parse = GST_UMX_PARSE(parent);
 
+	GST_TRACE_OBJECT(umx_parse, "entered chain function");
+
 	if (umx_parse->upstream_size < 0)
 	{
 		if (!gst_umx_parse_get_upstream_size(umx_parse, &(umx_parse->upstream_size)))
@@ -174,18 +175,16 @@ static gboolean gst_umx_parse_src_query(GstPad *pad, GstObject *parent, GstQuery
 	{
 		case GST_QUERY_DURATION:
 		{
-			if (!umx_parse->loaded)
-			{
-				GST_DEBUG_OBJECT(parent, "cannot respond to duration query: nothing is loaded yet");
-				break;
-			}
-
 			gst_query_parse_duration(query, &format, NULL);
+			GST_TRACE_OBJECT(umx_parse, "got duration query, format: %s", gst_format_get_name(format));
 			if ((format == GST_FORMAT_BYTES) && (umx_parse->module_data_size >= 0))
 			{
+				GST_TRACE_OBJECT(umx_parse, "responding to query with size %d", umx_parse->module_data_size);
 				gst_query_set_duration(query, format, umx_parse->module_data_size);
 				res = TRUE;
 			}
+			else
+				GST_TRACE_OBJECT(umx_parse, "cannot respond to query, no size set or query format is not in bytes");
 
 			break;
 		}
@@ -214,6 +213,14 @@ static GstFlowReturn gst_umx_parse_read(GstUmxParse *umx_parse, GstBuffer *umx_d
 	GstBuffer *module_data;
 	umx_index offset, size;
 	GstMapInfo in_map;
+
+
+	if (umx_parse->module_data_size > 0)
+	{
+		/* UMX music data was already read at this point - exit */
+		GST_DEBUG_OBJECT(umx_parse, "UMX music data already read, ignoring read call");
+		return GST_FLOW_OK;
+	}
 
 
 	gst_buffer_map(umx_data, &in_map, GST_MAP_READ);
@@ -351,11 +358,12 @@ static GstFlowReturn gst_umx_parse_read(GstUmxParse *umx_parse, GstBuffer *umx_d
 	gst_caps_unref(caps);
 
 	module_data = gst_buffer_copy_region(umx_data, GST_BUFFER_COPY_MEMORY, offset, size);
+	umx_parse->module_data_size = size;
 
 	ret = gst_pad_push(umx_parse->srcpad, module_data);
 	if (ret != GST_FLOW_OK)
 	{
-		GST_ERROR_OBJECT(umx_parse, "failed to push module data downstream: %s", gst_flow_get_name(ret));
+		GST_ERROR_OBJECT(umx_parse, "failed to push module data downstream: %s (%d)", gst_flow_get_name(ret), ret);
 		return ret;
 	}
 
