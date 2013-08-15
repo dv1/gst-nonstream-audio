@@ -10,11 +10,14 @@ GST_DEBUG_CATEGORY_STATIC(umxparse_debug);
 #define GST_CAT_DEFAULT umxparse_debug
 
 
+#define umx_media_type "application/x-unreal"
+
+
 static GstStaticPadTemplate sink_template = GST_STATIC_PAD_TEMPLATE(
 	"sink",
 	GST_PAD_SINK,
 	GST_PAD_ALWAYS,
-	GST_STATIC_CAPS("audio/x-umx; ")
+	GST_STATIC_CAPS(umx_media_type)
 );
 
 static GstStaticPadTemplate src_template = GST_STATIC_PAD_TEMPLATE(
@@ -75,7 +78,7 @@ void gst_umx_parse_class_init(GstUmxParseClass *klass)
 	gst_element_class_set_static_metadata(
 		element_class,
 		"Unreal UMX parser",
-		"Parser/Audio",
+		"Codec/Demuxer",
 		"Parses Unreal UMX legacy music files and extracts the module music contained within",
 		"Carlos Rafael Giani <dv@pseudoterminal.org>"
 	);
@@ -417,12 +420,28 @@ static umx_index gst_umx_parse_read_index(guint8 *data, gsize *bufofs)
 }
 
 
+static void gst_umx_parse_type_find(GstTypeFind *tf, G_GNUC_UNUSED gpointer user_data)
+{
+	const guint8 *data;
+
+	if ((data = gst_type_find_peek(tf, 0, 4)) != NULL)
+	{
+		if (memcmp(data, "\xC1\x83\x2A\x9E", 4) == 0)
+			gst_type_find_suggest_simple(tf, GST_TYPE_FIND_LIKELY, umx_media_type, NULL);
+	}
+}
+
+
 
 
 
 static gboolean plugin_init(GstPlugin *plugin)
 {
-	if (!gst_element_register(plugin, "umxparse", GST_RANK_PRIMARY + 1, gst_umx_parse_get_type())) return FALSE;
+	if (!gst_element_register(plugin, "umxparse", GST_RANK_PRIMARY + 1, gst_umx_parse_get_type()))
+		return FALSE;
+	if (!gst_type_find_register(plugin, umx_media_type, GST_RANK_PRIMARY, gst_umx_parse_type_find, "umx", NULL, NULL, NULL))
+		return FALSE;
+
 	return TRUE;
 }
 
