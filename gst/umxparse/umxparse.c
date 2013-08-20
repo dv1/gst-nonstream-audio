@@ -329,14 +329,53 @@ static GstFlowReturn gst_umx_parse_read(GstUmxParse *umx_parse, GstBuffer *umx_d
 			mod_type = names[0];
 
 			bufofs = serial_offset;
-			bufofs += 2; /* skip chunk count */
-			bufofs += 4; /* skip unknown value */
-			gst_umx_parse_read_index(in_map.data, &bufofs) /* skip chunk size */;
+
+			gst_umx_parse_read_index(in_map.data, &bufofs); /* skip number of properties */
+			/* Skip unused data, depending on the package version
+			 * Taken from OpenMPT's Load_umx.cpp */
+			if (pkg_version >= 120)
+			{
+				/* UT2003 packages */
+				gst_umx_parse_read_index(in_map.data, &bufofs);
+				bufofs += 8;
+			}
+			else if (pkg_version >= 100)
+			{
+				/* AAO packages */
+				bufofs += 4;
+				gst_umx_parse_read_index(in_map.data, &bufofs);
+				bufofs += 4;
+			}
+			else if (pkg_version >= 62)
+			{
+				/* UT packages
+				 * Mech8.umx and a few other UT tunes have packageVersion = 62.
+				 * In CUnSound.cpp, the condition above reads "packageVersion >= 63"
+				 * but if that is used, those tunes won't load properly.
+				 */
+				gst_umx_parse_read_index(in_map.data, &bufofs);
+				bufofs += 4;
+			}
+			else
+			{
+				/* old Unreal packages */
+				gst_umx_parse_read_index(in_map.data, &bufofs);
+			}
+
+			chunk_size = gst_umx_parse_read_index(in_map.data, &bufofs);
 
 			offset = bufofs;
-			size = umx_parse->upstream_size - offset; /* TODO */
+			size = chunk_size;
 
-			GST_DEBUG_OBJECT(umx_parse, "found music data at offset %u size %u", offset, size);
+			GST_DEBUG_OBJECT(
+				umx_parse,
+				"found music data at offset %u size %u (serial size: %d (%d without chunk metadata)  chunk size: %d)",
+				offset,
+				size,
+				serial_size,
+				serial_size - (bufofs - serial_offset),
+				chunk_size
+			);
 
 			break;
 		}
@@ -398,14 +437,9 @@ static umx_index gst_umx_parse_read_index(guint8 *data, gsize *bufofs)
 				more_bytes = (byte & 0x40);
 				break;
 			}
-			case 4:
-			{
-				idx |= (gint64)(byte) << (6 + (3 * 7));
-				break;
-			}
 			default:
 			{
-				idx |= (gint64)(byte) << (6 + ((i - 1) * 7));
+				idx |= (gint64)(byte & 0x7f) << (6 + ((i - 1) * 7));
 				more_bytes = (byte & 0x80);
 			}
 		}
