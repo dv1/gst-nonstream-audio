@@ -18,6 +18,8 @@ def configure(conf):
 
 	if not conf.options.enable_debug:
 		conf.env['DEFINES_GME'] += ['NDEBUG']
+	else:
+		conf.env['DEFINES_GME'] += ['CUSTOM_DPRINTF_FUNCTION']
 
 	conf.env['GME_ENABLED'] = 1
 
@@ -34,7 +36,6 @@ def build(bld):
 		"ymdeltat.cpp", \
 		"Ym3812_Emu.cpp", \
 		"Ym2612_Emu.cpp", \
-		"Ym2612_Emu_MAME.cpp", \
 		"Ym2610b_Emu.cpp", \
 		"Ym2608_Emu.cpp", \
 		"ym2413.c", \
@@ -113,6 +114,7 @@ def build(bld):
 		"Hes_Apu_Adpcm.cpp", \
 		"Gym_Emu.cpp", \
 		"gme.cpp", \
+		"gme_custom_dprintf.c", \
 		"Gme_Loader.cpp", \
 		"Gme_File.cpp", \
 		"Gbs_Emu.cpp", \
@@ -151,16 +153,17 @@ def build(bld):
 	gme_source_2 += ['extra/Data_Reader.cpp']
 
 	bld(
-		features = ['c', 'cxx', 'cxxstlib'],
+		features = ['c', 'cxx'],
 		includes = ['../..', '../../gst-libs', gme_path, '.', 'extra'],
 		uselib = 'STDINT GME',
 		source = gme_source_2,
-		target = 'gme'
+		target = 'gme',
+		name = 'gme'
 	)
 	bld(
 		features = ['c', 'cxx', 'cxxshlib'],
 		includes = ['../..', '../../gst-libs', '.', 'Game_Music_Emu-git'],
-		uselib = 'GSTREAMER GSTREAMER_BASE GSTREAMER_AUDIO',
+		uselib = 'GME GSTREAMER GSTREAMER_BASE GSTREAMER_AUDIO',
 		use = 'gstnonstreamaudio gme',
 		target = 'gstgme',
 		source = 'gstgmedec.c',

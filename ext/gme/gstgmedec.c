@@ -1,7 +1,10 @@
 #include <config.h>
 #include <gst/gst.h>
+#include <stdio.h>
+#include <stdarg.h>
 
 #include "gstgmedec.h"
+#include <gme/gme_custom_dprintf.h>
 
 
 GST_DEBUG_CATEGORY_STATIC(gmedec_debug);
@@ -91,6 +94,8 @@ static gint gst_gme_dec_get_num_loops(GstNonstreamAudioDecoder *dec);
 static guint gst_gme_dec_get_supported_output_modes(GstNonstreamAudioDecoder *dec);
 static gboolean gst_gme_dec_decode(GstNonstreamAudioDecoder *dec, GstBuffer **buffer, guint *num_samples);
 
+static void gst_gme_dec_custom_dprintf(const char * fmt, va_list vl);
+
 
 
 void gst_gme_dec_class_init(GstGmeDecClass *klass)
@@ -179,6 +184,10 @@ void gst_gme_dec_class_init(GstGmeDecClass *klass)
 		"Plays video game music using the Game Music Emulator library",
 		"Carlos Rafael Giani <dv@pseudoterminal.org>"
 	);
+
+#ifdef CUSTOM_DPRINTF_FUNCTION
+	gme_custom_dprintf = gst_gme_dec_custom_dprintf;
+#endif
 }
 
 
@@ -530,8 +539,8 @@ static gboolean gst_gme_dec_decode(GstNonstreamAudioDecoder *dec, GstBuffer **bu
 	GstBuffer *outbuf;
 	GstMapInfo map;
 
-	static gint const num_samples_per_outbuf = 1024;
-	static gint const num_bytes_per_outbuf = num_samples_per_outbuf * 2 * 2; // 2 bytes per sample, 2 channels
+	gint const num_samples_per_outbuf = 1024;
+	gint const num_bytes_per_outbuf = num_samples_per_outbuf * 2 * 2; // 2 bytes per sample, 2 channels
 
 	gme_dec = GST_GME_DEC(dec);
 
@@ -557,8 +566,15 @@ static gboolean gst_gme_dec_decode(GstNonstreamAudioDecoder *dec, GstBuffer **bu
 }
 
 
+#ifdef CUSTOM_DPRINTF_FUNCTION
 
-G_BEGIN_DECLS
+static void gst_gme_dec_custom_dprintf( const char * fmt, va_list vl )
+{
+	gst_debug_log_valist(GST_CAT_DEFAULT, GST_LEVEL_DEBUG, __FILE__, "custom_gme_dprintf", __LINE__, NULL, fmt, vl);
+}
+
+#endif
+
 
 
 static gboolean plugin_init(GstPlugin *plugin)
@@ -578,7 +594,4 @@ GST_PLUGIN_DEFINE(
 	"package",
 	"http://no-url-yet"
 )
-
-
-G_END_DECLS
 
