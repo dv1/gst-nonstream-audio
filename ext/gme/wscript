@@ -114,7 +114,6 @@ def build(bld):
 		"Hes_Apu_Adpcm.cpp", \
 		"Gym_Emu.cpp", \
 		"gme.cpp", \
-		"gme_custom_dprintf.c", \
 		"Gme_Loader.cpp", \
 		"Gme_File.cpp", \
 		"Gbs_Emu.cpp", \
@@ -147,6 +146,9 @@ def build(bld):
 		"Bml_Parser.cpp", \
 		"Spc_Sfm.cpp", \
 	]
+
+	if bld.env['DEBUG_IS_ENABLED']:
+		gme_source = gme_source + ['gme_custom_dprintf.c']
 
 	gme_path = 'Game_Music_Emu-git/gme'
 	gme_source_2 = map(lambda x: gme_path + '/' + x , gme_source)

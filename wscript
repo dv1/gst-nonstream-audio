@@ -63,6 +63,9 @@ def configure(conf):
 	conf.load('compiler_cxx')
 
 
+	if conf.options.enable_debug:
+		conf.env['DEBUG_IS_ENABLED'] = 1
+
 	# check and add compiler flags
 	if conf.env['CFLAGS'] and conf.env['LINKFLAGS']:
 		check_compiler_flags_2(conf, conf.env['CFLAGS'], conf.env['LINKFLAGS'], "Testing compiler flags %s and linker flags %s" % (' '.join(conf.env['CFLAGS']), ' '.join(conf.env['LINKFLAGS'])))
