@@ -250,6 +250,8 @@ struct _GstNonstreamAudioDecoderClass
 {
 	GstElementClass element_class;
 
+	gboolean loads_from_sinkpad;
+
 	/*< public >*/
 	/* virtual methods for subclasses */
 
