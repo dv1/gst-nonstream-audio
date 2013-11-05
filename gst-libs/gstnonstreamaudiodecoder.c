@@ -907,6 +907,12 @@ static gboolean gst_nonstream_audio_decoder_load(GstNonstreamAudioDecoder *dec, 
 
 	gst_nonstream_audio_decoder_update_toc(dec, dec_class);
 
+	if (!gst_nonstream_audio_decoder_negotiate(dec))
+	{
+		GST_ERROR_OBJECT(dec, "negotiation failed - aborting load");
+		return FALSE;
+	}
+
 	gst_segment_init(&(dec->cur_segment), GST_FORMAT_TIME);
 	gst_nonstream_audio_decoder_update_cur_segment(dec, initial_position, TRUE);
 
