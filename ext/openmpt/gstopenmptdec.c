@@ -137,7 +137,7 @@ static gboolean gst_openmpt_dec_seek(GstNonstreamAudioDecoder *dec, GstClockTime
 	GstOpenMptDec *openmpt_dec = GST_OPENMPT_DEC(dec);
 	g_return_val_if_fail(openmpt_dec->mod != NULL, FALSE);
 
-	openmpt_module_seek_seconds(openmpt_dec->mod, (double)(new_position) / GST_SECOND);
+	openmpt_module_set_position_seconds(openmpt_dec->mod, (double)(new_position) / GST_SECOND);
 
 	return TRUE;
 }
@@ -148,7 +148,7 @@ static GstClockTime gst_openmpt_dec_tell(GstNonstreamAudioDecoder *dec)
 	GstOpenMptDec *openmpt_dec = GST_OPENMPT_DEC(dec);
 	g_return_val_if_fail(openmpt_dec->mod != NULL, GST_CLOCK_TIME_NONE);
 
-	return (GstClockTime)(openmpt_module_get_current_position_seconds(openmpt_dec->mod) * GST_SECOND);
+	return (GstClockTime)(openmpt_module_get_position_seconds(openmpt_dec->mod) * GST_SECOND);
 }
 
 
@@ -178,7 +178,7 @@ static gboolean gst_openmpt_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, 
 		return FALSE;
 
 	gst_buffer_map(source_data, &map, GST_MAP_READ);
-	openmpt_dec->mod = openmpt_module_create_from_memory(map.data, map.size, gst_openmpt_dec_log_func, dec);
+	openmpt_dec->mod = openmpt_module_create_from_memory(map.data, map.size, gst_openmpt_dec_log_func, dec, NULL);
 	gst_buffer_unmap(source_data, &map);
 
 	if (openmpt_dec->mod == NULL)
@@ -187,7 +187,18 @@ static gboolean gst_openmpt_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, 
 		return FALSE;
 	}
 
-	GST_DEBUG_OBJECT(dec, "metadata keys: [%s]", openmpt_module_get_metadata_keys(openmpt_dec->mod));
+	{
+		char const *metadata_keys = openmpt_module_get_metadata_keys(openmpt_dec->mod);
+		if (metadata_keys != NULL)
+		{
+			GST_DEBUG_OBJECT(dec, "metadata keys: [%s]", metadata_keys);
+			openmpt_free_string(metadata_keys);
+		}
+		else
+		{
+			GST_DEBUG_OBJECT(dec, "no metadata keys found");
+		}
+	}
 
 	openmpt_dec->num_subsongs = openmpt_module_get_num_subsongs(openmpt_dec->mod);
 	if (G_UNLIKELY(initial_subsong >= openmpt_dec->num_subsongs))
@@ -230,7 +241,10 @@ static gboolean gst_openmpt_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, 
 #define GSTOPENMPT_ADD_TO_TAGS(KEY, TAG_TYPE) \
 		metadata = openmpt_module_get_metadata(openmpt_dec->mod, (KEY)); \
 		if (metadata && *metadata) \
-			gst_tag_list_add(tags, GST_TAG_MERGE_REPLACE, (TAG_TYPE), metadata, NULL);
+		{ \
+			gst_tag_list_add(tags, GST_TAG_MERGE_REPLACE, (TAG_TYPE), metadata, NULL); \
+			openmpt_free_string(metadata); \
+		}
 
 		GSTOPENMPT_ADD_TO_TAGS("title", GST_TAG_TITLE);
 		GSTOPENMPT_ADD_TO_TAGS("author", GST_TAG_ARTIST);
@@ -293,6 +307,7 @@ static GstTagList* gst_openmpt_dec_get_subsong_tags(GstNonstreamAudioDecoder *de
 	{
 		GstTagList *tags = gst_tag_list_new_empty();
 		gst_tag_list_add(tags, GST_TAG_MERGE_REPLACE, "title", name, NULL);
+		openmpt_free_string(name);
 		return tags;
 	}
 	else
