@@ -94,7 +94,9 @@ static gint gst_gme_dec_get_num_loops(GstNonstreamAudioDecoder *dec);
 static guint gst_gme_dec_get_supported_output_modes(GstNonstreamAudioDecoder *dec);
 static gboolean gst_gme_dec_decode(GstNonstreamAudioDecoder *dec, GstBuffer **buffer, guint *num_samples);
 
+#ifdef CUSTOM_DPRINTF_FUNCTION
 static void gst_gme_dec_custom_dprintf(const char * fmt, va_list vl);
+#endif
 
 
 
