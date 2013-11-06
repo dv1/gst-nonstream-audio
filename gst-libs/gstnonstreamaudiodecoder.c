@@ -209,7 +209,7 @@ static gboolean gst_nonstream_audio_decoder_sinkpad_activate(GstPad *pad, GstObj
 static gboolean gst_nonstream_audio_decoder_sinkpad_activate_mode(GstPad *pad, GstObject *parent, GstPadMode mode, gboolean active);
 
 static gboolean gst_nonstream_audio_decoder_get_upstream_size(GstNonstreamAudioDecoder *dec, gint64 *length);
-static gboolean gst_nonstream_audio_decoder_finish_load(GstNonstreamAudioDecoder *dec, gboolean load_ok);
+static gboolean gst_nonstream_audio_decoder_finish_load(GstNonstreamAudioDecoder *dec, gboolean load_ok, GstClockTime initial_position);
 static gboolean gst_nonstream_audio_decoder_load_from_buffer(GstNonstreamAudioDecoder *dec, GstBuffer *buffer);
 static gboolean gst_nonstream_audio_decoder_load_from_custom(GstNonstreamAudioDecoder *dec);
 static void gst_nonstream_audio_decoder_update_toc(GstNonstreamAudioDecoder *dec, GstNonstreamAudioDecoderClass *klass);
@@ -891,9 +891,8 @@ static gboolean gst_nonstream_audio_decoder_get_upstream_size(GstNonstreamAudioD
 }
 
 
-static gboolean gst_nonstream_audio_decoder_finish_load(GstNonstreamAudioDecoder *dec, gboolean load_ok)
+static gboolean gst_nonstream_audio_decoder_finish_load(GstNonstreamAudioDecoder *dec, gboolean load_ok, GstClockTime initial_position)
 {
-	GstClockTime initial_position;
 	GstNonstreamAudioDecoderClass *dec_class;
 	GstClockTime duration;
 
@@ -960,7 +959,7 @@ static gboolean gst_nonstream_audio_decoder_load_from_buffer(GstNonstreamAudioDe
 	load_ok = dec_class->load_from_buffer(dec, buffer, dec->initial_subsong, &initial_position, &(dec->output_mode));
 	gst_buffer_unref(buffer);
 
-	return gst_nonstream_audio_decoder_finish_load(dec, load_ok);
+	return gst_nonstream_audio_decoder_finish_load(dec, load_ok, initial_position);
 }
 
 
@@ -977,7 +976,7 @@ static gboolean gst_nonstream_audio_decoder_load_from_custom(GstNonstreamAudioDe
 	initial_position = 0;
 	load_ok = dec_class->load_from_custom(dec, dec->initial_subsong, &initial_position, &(dec->output_mode));
 
-	return gst_nonstream_audio_decoder_finish_load(dec, load_ok);
+	return gst_nonstream_audio_decoder_finish_load(dec, load_ok, initial_position);
 }
 
 
