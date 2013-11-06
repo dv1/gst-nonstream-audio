@@ -19,8 +19,9 @@ static GstStaticPadTemplate sink_template = GST_STATIC_PAD_TEMPLATE(
 	GST_PAD_ALWAYS,
 	GST_STATIC_CAPS(
 		"audio/x-mod "
-		/* Disabled until typefinders get this field */
-		/*", type = (string) { 669, asylum-amf, dsmi-amf, extreme-ams, velvet-ams, dbm, digi, dmf, dsm, far, gdm, imf, it, j2b, mdl, med, mod, mt2, mtm, okt, psm, ptm, s3m, stm, ult, xm }"*/
+#if GST_CHECK_VERSION(1, 2, 0)
+		", type = (string) { 669, asylum-amf, dsmi-amf, extreme-ams, velvet-ams, dbm, digi, dmf, dsm, far, gdm, imf, it, j2b, mdl, med, mod, mt2, mtm, okt, psm, ptm, s3m, stm, ult, xm }"
+#endif
 	)
 );
 
