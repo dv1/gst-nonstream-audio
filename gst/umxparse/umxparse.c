@@ -182,7 +182,7 @@ static gboolean gst_umx_parse_src_query(GstPad *pad, GstObject *parent, GstQuery
 			GST_TRACE_OBJECT(umx_parse, "got duration query, format: %s", gst_format_get_name(format));
 			if ((format == GST_FORMAT_BYTES) && (umx_parse->module_data_size >= 0))
 			{
-				GST_TRACE_OBJECT(umx_parse, "responding to query with size %d", umx_parse->module_data_size);
+				GST_TRACE_OBJECT(umx_parse, "responding to query with size %" G_GINT64_FORMAT, umx_parse->module_data_size);
 				gst_query_set_duration(query, format, umx_parse->module_data_size);
 				res = TRUE;
 			}
@@ -369,7 +369,7 @@ static GstFlowReturn gst_umx_parse_read(GstUmxParse *umx_parse, GstBuffer *umx_d
 
 			GST_DEBUG_OBJECT(
 				umx_parse,
-				"found music data at offset %u size %u (serial size: %d (%d without chunk metadata)  chunk size: %d)",
+				"found music data at offset %" G_GINT64_FORMAT " size %" G_GINT64_FORMAT " (serial size: %" G_GINT64_FORMAT " (%" G_GINT64_FORMAT " without chunk metadata)  chunk size: %" G_GINT64_FORMAT ")",
 				offset,
 				size,
 				serial_size,

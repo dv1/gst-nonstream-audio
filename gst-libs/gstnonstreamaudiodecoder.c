@@ -876,7 +876,7 @@ static gboolean gst_nonstream_audio_decoder_load(GstNonstreamAudioDecoder *dec, 
 	GstNonstreamAudioDecoderClass *dec_class;
 	GstClockTime duration;
 
-	GST_LOG_OBJECT(dec, "Read %u bytes from upstream", gst_buffer_get_size(buffer));
+	GST_LOG_OBJECT(dec, "Read %" G_GSIZE_FORMAT " bytes from upstream", gst_buffer_get_size(buffer));
 
 	dec_class = GST_NONSTREAM_AUDIO_DECODER_CLASS(G_OBJECT_GET_CLASS(dec));
 
@@ -974,7 +974,7 @@ static void gst_nonstream_audio_decoder_update_toc(GstNonstreamAudioDecoder *dec
 			"new toc entry: uid: \"%s\" duration: %" GST_TIME_FORMAT " tags: %" GST_PTR_FORMAT,
 			uid,
 			GST_TIME_ARGS(duration),
-			tags
+			(gpointer)tags
 		);
 
 		gst_toc_append_entry(dec->toc, entry);
@@ -1065,7 +1065,7 @@ static void gst_nonstream_audio_decoder_loop(GstNonstreamAudioDecoder *dec)
 
 			GST_LOG_OBJECT(
 				dec,
-				"output buffer stats: num_samples = %u  duration = %" GST_TIME_FORMAT "  offset = %u  timestamp = %" GST_TIME_FORMAT,
+				"output buffer stats: num_samples = %u  duration = %" GST_TIME_FORMAT "  offset = %" G_GUINT64_FORMAT "  timestamp = %" GST_TIME_FORMAT,
 				num_samples,
 				GST_TIME_ARGS(GST_BUFFER_DURATION(outbuf)),
 				dec->offset,
@@ -1129,7 +1129,7 @@ static gboolean gst_nonstream_audio_decoder_negotiate_default(GstNonstreamAudioD
 
 	caps = gst_audio_info_to_caps(&(dec->audio_info));
 
-	GST_DEBUG_OBJECT(dec, "setting src caps %" GST_PTR_FORMAT, caps);
+	GST_DEBUG_OBJECT(dec, "setting src caps %" GST_PTR_FORMAT, (gpointer)caps);
 
 	res = gst_pad_push_event(dec->srcpad, gst_event_new_caps(caps));
 
@@ -1147,7 +1147,7 @@ static gboolean gst_nonstream_audio_decoder_negotiate_default(GstNonstreamAudioD
 	g_assert(dec_class->decide_allocation != NULL);
 	res = dec_class->decide_allocation (dec, query);
 
-	GST_DEBUG_OBJECT(dec, "ALLOCATION (%d) params: %" GST_PTR_FORMAT, res, query);
+	GST_DEBUG_OBJECT(dec, "ALLOCATION (%d) params: %" GST_PTR_FORMAT, res, (gpointer)query);
 
 	if (!res)
 		goto no_decide_allocation;
@@ -1478,14 +1478,14 @@ gboolean gst_nonstream_audio_decoder_set_output_audioinfo(GstNonstreamAudioDecod
 		dec->audio_info = *audio_info;
 		dec->output_format_changed = TRUE;
 
-		GST_INFO_OBJECT(dec, "setting output format to %" GST_PTR_FORMAT, caps);
+		GST_INFO_OBJECT(dec, "setting output format to %" GST_PTR_FORMAT, (gpointer)caps);
 	}
 	else
 	{
 		GST_WARNING_OBJECT(
 			dec,
 			"requested output format %" GST_PTR_FORMAT " do not match template %" GST_PTR_FORMAT,
-			caps, templ_caps
+			(gpointer)caps, (gpointer)templ_caps
 		);
 
 		res = FALSE;
@@ -1571,10 +1571,10 @@ void gst_nonstream_audio_decoder_get_downstream_info(GstNonstreamAudioDecoder *d
 		{
 			GstAudioFormat fmt = gst_audio_format_from_string(format_str);
 			if (fmt == GST_AUDIO_FORMAT_UNKNOWN)
-				GST_WARNING_OBJECT(dec, "caps structure %" GST_PTR_FORMAT " does not contain a valid format", structure);
+				GST_WARNING_OBJECT(dec, "caps structure %" GST_PTR_FORMAT " does not contain a valid format", (gpointer)structure);
 			else
 			{
-				GST_DEBUG_OBJECT(dec, "got format from structure #%u : %s", structure_nr, fmt);
+				GST_DEBUG_OBJECT(dec, "got format from structure #%u : %s", structure_nr, format_str);
 				ds_format_found = TRUE;
 			}
 		}
