@@ -433,7 +433,7 @@ static gboolean gst_dumb_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, Gst
 					if (psm_duh != NULL)
 					{
 						long len = dumb_it_build_checkpoints(duh_get_it_sigdata(psm_duh), 0);
-						GST_DEBUG_OBJECT(dumb_dec, "subsong %d: length %d", subsong_idx, len);
+						GST_DEBUG_OBJECT(dumb_dec, "subsong %d: length %ld", subsong_idx, len);
 						unload_duh(psm_duh);
 						subsong_info[subsong_idx].start_order = 0;
 						subsong_info[subsong_idx].length = len;
@@ -488,7 +488,7 @@ static gboolean gst_dumb_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, Gst
 
 		g_array_append_val(dumb_dec->subsongs, info);
 
-		GST_INFO_OBJECT(dumb_dec, "no subsongs found - adding entire song as one subsong, start order 0, length %d", info.length);
+		GST_INFO_OBJECT(dumb_dec, "no subsongs found - adding entire song as one subsong, start order 0, length %ld", info.length);
 	}
 
 	dumb_dec->num_subsongs = dumb_dec->subsongs->len;
@@ -667,7 +667,7 @@ static gboolean gst_dumb_dec_decode(GstNonstreamAudioDecoder *dec, GstBuffer **b
 	num_bytes_per_outbuf = num_samples_per_outbuf * dumb_dec->num_channels * RENDER_BIT_DEPTH / 8;
 
 	outbuf = gst_nonstream_audio_decoder_allocate_output_buffer(dec, num_bytes_per_outbuf);
-	if (outbuf == NULL)
+	if (G_UNLIKELY(outbuf == NULL))
 		return FALSE;
 
 	gst_buffer_map(outbuf, &map, GST_MAP_WRITE);
@@ -724,7 +724,7 @@ static int gst_dumb_dec_loop_callback(void *ptr)
 		dumb_dec->loop_end_reached = TRUE;
 	}
 
-	GST_DEBUG_OBJECT(dec, "position reported by DUMB: %u loopcount: %u", duh_sigrenderer_get_position(dumb_dec->duh_sigrenderer), dumb_dec->cur_loop_count);
+	GST_DEBUG_OBJECT(dec, "position reported by DUMB: %ld loopcount: %u", duh_sigrenderer_get_position(dumb_dec->duh_sigrenderer), dumb_dec->cur_loop_count);
 
 	return continue_loop ? 0 : 1;
 }
@@ -864,7 +864,7 @@ static int gst_dumb_scan_callback(void *context, int order, long length)
 	gst_dumb_dec_subsong_info info;
 	
 	ctx = (gst_dumb_subsong_scan_context *)context;
-	GST_DEBUG_OBJECT(ctx->dumb_dec, "found subsong in scan callback: order %d length %d", order, length);
+	GST_DEBUG_OBJECT(ctx->dumb_dec, "found subsong in scan callback: order %d length %ld", order, length);
 
 	info.start_order = order;
 	info.length = length;
