@@ -444,7 +444,7 @@ static GstStateChangeReturn gst_nonstream_audio_decoder_change_state(GstElement 
 
 	switch (transition)
 	{
-		case GST_STATE_CHANGE_PLAYING_TO_PAUSED:
+		case GST_STATE_CHANGE_READY_TO_PAUSED:
 		{
 			GstNonstreamAudioDecoder *dec = GST_NONSTREAM_AUDIO_DECODER(element);
 			GstNonstreamAudioDecoderClass *dec_class = GST_NONSTREAM_AUDIO_DECODER_GET_CLASS(dec);
