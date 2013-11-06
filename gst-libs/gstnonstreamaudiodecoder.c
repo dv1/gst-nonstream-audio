@@ -209,7 +209,9 @@ static gboolean gst_nonstream_audio_decoder_sinkpad_activate(GstPad *pad, GstObj
 static gboolean gst_nonstream_audio_decoder_sinkpad_activate_mode(GstPad *pad, GstObject *parent, GstPadMode mode, gboolean active);
 
 static gboolean gst_nonstream_audio_decoder_get_upstream_size(GstNonstreamAudioDecoder *dec, gint64 *length);
-static gboolean gst_nonstream_audio_decoder_load(GstNonstreamAudioDecoder *dec, GstBuffer *buffer);
+static gboolean gst_nonstream_audio_decoder_finish_load(GstNonstreamAudioDecoder *dec, gboolean load_ok);
+static gboolean gst_nonstream_audio_decoder_load_from_buffer(GstNonstreamAudioDecoder *dec, GstBuffer *buffer);
+static gboolean gst_nonstream_audio_decoder_load_from_custom(GstNonstreamAudioDecoder *dec);
 static void gst_nonstream_audio_decoder_update_toc(GstNonstreamAudioDecoder *dec, GstNonstreamAudioDecoderClass *klass);
 static void gst_nonstream_audio_decoder_loop(GstNonstreamAudioDecoder *dec);
 static void gst_nonstream_audio_decoder_update_duration(GstNonstreamAudioDecoder *dec, GstClockTime duration);
@@ -363,6 +365,7 @@ static void gst_nonstream_audio_decoder_class_init(GstNonstreamAudioDecoderClass
 	dec_class->tell = NULL;
 
 	dec_class->load_from_buffer = NULL;
+	dec_class->load_from_custom = NULL;
 
 	dec_class->get_current_subsong = NULL;
 	dec_class->set_current_subsong = NULL;
@@ -442,11 +445,30 @@ static GstStateChangeReturn gst_nonstream_audio_decoder_change_state(GstElement 
 	switch (transition)
 	{
 		case GST_STATE_CHANGE_PLAYING_TO_PAUSED:
+		{
+			GstNonstreamAudioDecoder *dec = GST_NONSTREAM_AUDIO_DECODER(element);
+			GstNonstreamAudioDecoderClass *dec_class = GST_NONSTREAM_AUDIO_DECODER_GET_CLASS(dec);
+
+			if (!(dec_class->loads_from_sinkpad) && !(dec->loaded))
+			{
+				g_assert(dec_class->load_from_custom != NULL);
+
+				if (!gst_nonstream_audio_decoder_load_from_custom(dec))
+					return GST_STATE_CHANGE_FAILURE;
+
+				if (!gst_pad_start_task(dec->srcpad, (GstTaskFunction)gst_nonstream_audio_decoder_loop, element, NULL))
+					return GST_STATE_CHANGE_FAILURE;
+			}
+
 			break;
+		}
+
 		case GST_STATE_CHANGE_PAUSED_TO_READY:
 			break;
+
 		case GST_STATE_CHANGE_READY_TO_NULL:
 			break;
+
 		default:
 			break;
 	}
@@ -474,7 +496,7 @@ static gboolean gst_nonstream_audio_decoder_sink_event(GstPad *pad, GstObject *p
 			avail_size = gst_adapter_available(dec->adapter);
 			adapter_buffer = gst_adapter_take_buffer(dec->adapter, avail_size);
 
-			if (!gst_nonstream_audio_decoder_load(dec, adapter_buffer))
+			if (!gst_nonstream_audio_decoder_load_from_buffer(dec, adapter_buffer))
 				return FALSE;
 
 			return gst_pad_start_task(dec->srcpad, (GstTaskFunction)gst_nonstream_audio_decoder_loop, parent, NULL);
@@ -517,7 +539,7 @@ static GstFlowReturn gst_nonstream_audio_decoder_chain(G_GNUC_UNUSED GstPad *pad
 		{
 			GstBuffer *adapter_buffer = gst_adapter_take_buffer(dec->adapter, avail_size);
 
-			if (!gst_nonstream_audio_decoder_load(dec, adapter_buffer))
+			if (!gst_nonstream_audio_decoder_load_from_buffer(dec, adapter_buffer))
 				return GST_FLOW_ERROR;
 
 			return gst_pad_start_task(dec->srcpad, (GstTaskFunction)gst_nonstream_audio_decoder_loop, parent, NULL) ? GST_FLOW_OK : GST_FLOW_ERROR;
@@ -869,22 +891,15 @@ static gboolean gst_nonstream_audio_decoder_get_upstream_size(GstNonstreamAudioD
 }
 
 
-static gboolean gst_nonstream_audio_decoder_load(GstNonstreamAudioDecoder *dec, GstBuffer *buffer)
+static gboolean gst_nonstream_audio_decoder_finish_load(GstNonstreamAudioDecoder *dec, gboolean load_ok)
 {
-	gboolean module_ok;
 	GstClockTime initial_position;
 	GstNonstreamAudioDecoderClass *dec_class;
 	GstClockTime duration;
 
-	GST_LOG_OBJECT(dec, "Read %" G_GSIZE_FORMAT " bytes from upstream", gst_buffer_get_size(buffer));
-
 	dec_class = GST_NONSTREAM_AUDIO_DECODER_CLASS(G_OBJECT_GET_CLASS(dec));
 
-	initial_position = 0;
-	module_ok = dec_class->load_from_buffer(dec, buffer, dec->initial_subsong, &initial_position, &(dec->output_mode));
-	gst_buffer_unref(buffer);
-
-	if (!module_ok)
+	if (!load_ok)
 	{
 		GST_ELEMENT_ERROR(dec, STREAM, DECODE, (NULL), ("Loading failed"));
 		return FALSE;
@@ -928,6 +943,41 @@ static gboolean gst_nonstream_audio_decoder_load(GstNonstreamAudioDecoder *dec, 
 	dec->loaded = TRUE;
 
 	return TRUE;
+}
+
+
+static gboolean gst_nonstream_audio_decoder_load_from_buffer(GstNonstreamAudioDecoder *dec, GstBuffer *buffer)
+{
+	gboolean load_ok;
+	GstClockTime initial_position;
+	GstNonstreamAudioDecoderClass *dec_class;
+
+	GST_LOG_OBJECT(dec, "Read %" G_GSIZE_FORMAT " bytes from upstream", gst_buffer_get_size(buffer));
+
+	dec_class = GST_NONSTREAM_AUDIO_DECODER_CLASS(G_OBJECT_GET_CLASS(dec));
+
+	initial_position = 0;
+	load_ok = dec_class->load_from_buffer(dec, buffer, dec->initial_subsong, &initial_position, &(dec->output_mode));
+	gst_buffer_unref(buffer);
+
+	return gst_nonstream_audio_decoder_finish_load(dec, load_ok);
+}
+
+
+static gboolean gst_nonstream_audio_decoder_load_from_custom(GstNonstreamAudioDecoder *dec)
+{
+	gboolean load_ok;
+	GstClockTime initial_position;
+	GstNonstreamAudioDecoderClass *dec_class;
+
+	GST_LOG_OBJECT(dec, "Reading song from custom source defined by derived class");
+
+	dec_class = GST_NONSTREAM_AUDIO_DECODER_CLASS(G_OBJECT_GET_CLASS(dec));
+
+	initial_position = 0;
+	load_ok = dec_class->load_from_custom(dec, dec->initial_subsong, &initial_position, &(dec->output_mode));
+
+	return gst_nonstream_audio_decoder_finish_load(dec, load_ok);
 }
 
 
@@ -1029,7 +1079,7 @@ static void gst_nonstream_audio_decoder_loop(GstNonstreamAudioDecoder *dec)
 			goto pause;
 		}
 
-		if (!gst_nonstream_audio_decoder_load(dec, buffer))
+		if (!gst_nonstream_audio_decoder_load_from_buffer(dec, buffer))
 			goto pause;
 	}
 

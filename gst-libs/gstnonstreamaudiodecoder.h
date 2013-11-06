@@ -170,7 +170,7 @@ struct _GstNonstreamAudioDecoder
  *                              The position that this function returns must be relative to
  *                              the current subsong. Thus, the minimum is 0, and the maximum
  *                              is the subsong length.
- * @load_from_buffer:           Required.
+ * @load_from_buffer:           Required if loads_from_sinkpad is set to TRUE (the default value).
  *                              Loads the media from the given buffer. The entire media is supplied at once,
  *                              so after this call, loading should be finished. This function
  *                              can also make use of a suggested initial subsong and initial
@@ -178,6 +178,10 @@ struct _GstNonstreamAudioDecoder
  *                              position, the function must pass this position to *initial_position.
  *                              The subclass does not have to unref the input buffer; the base class does that
  *                              already.
+ * @load_from_custom:           Required if loads_from_sinkpad is set to FALSE.
+ *                              Loads the media in a way defined by the custom sink. Data is not supplied;
+ *                              the derived class has to handle this on its own. Otherwise, this function is
+ *                              identical to @load_from_buffer.
  * @set_current_subsong:        Optional.
  *                              Sets the current subsong. This function is allowed to switch to a different
  *                              subsong than the required one, and can optionally make use of the suggested initial
@@ -214,7 +218,7 @@ struct _GstNonstreamAudioDecoder
  *                              a subset at the end or in the middle of a song is repeated, for example.
  * @get_num_loops:              Optional.
  *                              Returns the number of loops for playback.
- * @get_supported_output_modes: Required.
+ * @get_supported_output_modes: Always required.
  *                              Returns a bitmask containing the output modes the subclass supports.
  *                              The mask is formed by a bitwise OR combination of integers, which can be calculated
  *                              this way:  1 << GST_NONSTREM_AUDIO_OUTPUT_MODE_<mode> , where mode is either STEADY or LOOPING
@@ -223,7 +227,7 @@ struct _GstNonstreamAudioDecoder
  *                              cannot choose a different mode; it must use the requested one.
  *                              If the output mode is set to LOOPING, @gst_nonstream_audio_decoder_handle_loop
  *                              must be called after playback moved back to the start of a loop.
- * @decode:                     Required.
+ * @decode:                     Always required.
  *                              Allocates an output buffer, fills it with decoded audio samples, and must be passed on to
  *                              *buffer . The number of decoded samples must be passed on to *num_samples.
  *                              If decoding finishes or the decoding is no longer possible (for example, due to an
@@ -240,11 +244,21 @@ struct _GstNonstreamAudioDecoder
  *                              invoke the default handler.
  *
  * Subclasses can override any of the available optional virtual methods or not, as
- * needed. At minimum, @load_from_buffer, @get_supported_output_modes, and @decode need
- * to be overridden.
+ * needed. At minimum, @load_from_buffer (or @load_from_custom), @get_supported_output_modes,
+ * and @decode need to be overridden.
  *
- * These functions (with the exception of @load_from_buffer) only need to be functional
- * after the media was loaded, since the base class will not call them before.
+ * These functions (with the exception of @load_from_buffer and @load_from_custom) only need
+ * to be functional after the media was loaded, since the base class will not call them before.
+ *
+ * By default, this class works by reading media data from the sinkpad, and then commencing
+ * playback. Some decoders cannot be given data from a memory block, so the usual way of
+ * reading all upstream data and passing it to @load_from_buffer doesn't work then. In this case,
+ * set the value of loads_from_sinkpad to FALSE. This changes the way this class operates;
+ * it does not require a sinkpad to exist anymore, and will call @load_from_custom instead.
+ * One example of a decoder where this makes sense is UADE (Unix Amiga Delitracker Emulator).
+ * For some formats (such as TFMX), it needs to do the file loading by itself.
+ * Since most decoders can read input data from a memory block, the default value of
+ * loads_from_sinkpad is TRUE.
  */
 struct _GstNonstreamAudioDecoderClass
 {
@@ -259,6 +273,7 @@ struct _GstNonstreamAudioDecoderClass
 	GstClockTime (*tell)(GstNonstreamAudioDecoder *dec);
 
 	gboolean (*load_from_buffer)(GstNonstreamAudioDecoder *dec, GstBuffer *source_data, guint initial_subsong, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode);
+	gboolean (*load_from_custom)(GstNonstreamAudioDecoder *dec, guint initial_subsong, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode);
 
 	gboolean (*set_current_subsong)(GstNonstreamAudioDecoder *dec, guint subsong, GstClockTime *initial_position);
 	guint (*get_current_subsong)(GstNonstreamAudioDecoder *dec);
