@@ -314,6 +314,7 @@ static void gst_dumb_dec_set_property(GObject *object, guint prop_id, const GVal
 			break;
 		}
 		default:
+			G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
 			break;
 	}
 }
@@ -332,6 +333,7 @@ static void gst_dumb_dec_get_property(GObject *object, guint prop_id, GValue *va
 			g_value_set_enum(value, dumb_dec->ramp_style);
 			break;
 		default:
+			G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
 			break;
 	}
 }
