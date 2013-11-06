@@ -129,6 +129,8 @@ static void gst_openmpt_dec_finalize(GObject *object)
 
 	g_free(openmpt_dec->left);
 	g_free(openmpt_dec->right);
+
+	G_OBJECT_CLASS(gst_openmpt_dec_parent_class)->finalize(object);
 }
 
 
