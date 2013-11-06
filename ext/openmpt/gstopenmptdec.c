@@ -13,16 +13,18 @@ GST_DEBUG_CATEGORY_STATIC(openmptdec_debug);
 
 
 
+#if GST_CHECK_VERSION(1, 2, 0)
+#define MOD_CAPS_TYPESTR ", type = (string) { 669, asylum-amf, dsmi-amf, extreme-ams, velvet-ams, dbm, digi, dmf, dsm, far, gdm, imf, it, j2b, mdl, med, mod, mt2, mtm, okt, psm, ptm, s3m, stm, ult, xm }"
+#else
+#define MOD_CAPS_TYPESTR ""
+#endif
+
+
 static GstStaticPadTemplate sink_template = GST_STATIC_PAD_TEMPLATE(
 	"sink",
 	GST_PAD_SINK,
 	GST_PAD_ALWAYS,
-	GST_STATIC_CAPS(
-		"audio/x-mod "
-#if GST_CHECK_VERSION(1, 2, 0)
-		", type = (string) { 669, asylum-amf, dsmi-amf, extreme-ams, velvet-ams, dbm, digi, dmf, dsm, far, gdm, imf, it, j2b, mdl, med, mod, mt2, mtm, okt, psm, ptm, s3m, stm, ult, xm }"
-#endif
-	)
+	GST_STATIC_CAPS("audio/x-mod " MOD_CAPS_TYPESTR)
 );
 
 static GstStaticPadTemplate src_template = GST_STATIC_PAD_TEMPLATE(

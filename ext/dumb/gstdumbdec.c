@@ -42,16 +42,18 @@ enum
 
 
 
+#if GST_CHECK_VERSION(1, 2, 0)
+#define MOD_CAPS_TYPESTR ", type = (string) { mod, s3m, stm, xm, it, ptm, psm, mtm, 669, dsm, asylum-amf, dsmi-amf, okt }"
+#else
+#define MOD_CAPS_TYPESTR ""
+#endif
+
+
 static GstStaticPadTemplate sink_template = GST_STATIC_PAD_TEMPLATE(
 	"sink",
 	GST_PAD_SINK,
 	GST_PAD_ALWAYS,
-	GST_STATIC_CAPS(
-		"audio/x-mod "
-#if GST_CHECK_VERSION(1, 2, 0)
-		", type = (string) { mod, s3m, stm, xm, it, ptm, psm, mtm, 669, dsm, asylum-amf, dsmi-amf, okt }"
-#endif
-	)
+	GST_STATIC_CAPS("audio/x-mod " MOD_CAPS_TYPESTR)
 );
 
 static GstStaticPadTemplate src_template = GST_STATIC_PAD_TEMPLATE(
