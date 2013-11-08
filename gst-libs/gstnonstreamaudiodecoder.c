@@ -982,6 +982,7 @@ static gboolean gst_nonstream_audio_decoder_load_from_custom(GstNonstreamAudioDe
 
 static void gst_nonstream_audio_decoder_update_toc(GstNonstreamAudioDecoder *dec, GstNonstreamAudioDecoderClass *klass)
 {
+#if 0 // TODO: this causes a freeze when shutting down GStreamer and playing audio with UADE
 	guint num_subsongs, i;
 	gboolean update = FALSE;
 
@@ -1003,13 +1004,13 @@ static void gst_nonstream_audio_decoder_update_toc(GstNonstreamAudioDecoder *dec
 		GstTocEntry *entry;
 		GstClockTime duration;
 		GstTagList *tags;
-		
-		uid = g_strdup_printf("%u", i);
-		entry = gst_toc_entry_new(GST_TOC_ENTRY_TYPE_TITLE, uid);
 
 		/* TODO: combine this with looping */
 		duration = (klass->get_subsong_duration != NULL) ? klass->get_subsong_duration(dec, i) : GST_CLOCK_TIME_NONE;
 		tags = (klass->get_subsong_tags != NULL) ? klass->get_subsong_tags(dec, i) : (GstTagList*)NULL;
+
+		uid = g_strdup_printf("%u", i);
+		entry = gst_toc_entry_new(GST_TOC_ENTRY_TYPE_TITLE, uid);
 
 		/* TOC does not allow GST_CLOCK_TIME_NONE as a stop value */
 		if (duration == GST_CLOCK_TIME_NONE)
@@ -1033,6 +1034,7 @@ static void gst_nonstream_audio_decoder_update_toc(GstNonstreamAudioDecoder *dec
 
 	gst_pad_push_event(dec->srcpad, gst_event_new_toc(dec->toc, update));
 	gst_message_new_toc(GST_OBJECT(dec), dec->toc, update);
+#endif
 }
 
 
