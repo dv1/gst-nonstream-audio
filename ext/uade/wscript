@@ -26,7 +26,7 @@ def build(bld):
 		uselib = 'GSTREAMER GSTREAMER_BASE GSTREAMER_AUDIO UADE',
 		use = 'gstnonstreamaudio',
 		target = 'gstuade',
-		source = 'gstuadedec.c',
+		source = ['gstuade.c', 'gstuaderawdec.c'],
 		install_path = bld.env['PLUGIN_INSTALL_PATH']
 	)
 
