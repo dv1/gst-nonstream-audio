@@ -154,6 +154,8 @@ struct _GstNonstreamAudioDecoder
 	GstAdapter *adapter;
 	gint64 upstream_size;
 
+	gboolean sinkpad_in_pull_mode;
+
 	GRecMutex stream_lock;
 };
 
