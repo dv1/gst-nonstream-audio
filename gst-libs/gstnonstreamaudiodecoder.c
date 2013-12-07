@@ -485,6 +485,11 @@ static gboolean gst_nonstream_audio_decoder_sink_event(GstPad *pad, GstObject *p
 
 	switch(GST_EVENT_TYPE (event))
 	{
+		case GST_EVENT_SEGMENT:
+			/* Upstream sends in a byte segment, which is uninteresting here,
+			 * since a custom segment event is generated anyway */
+			gst_event_unref(event);
+			return TRUE;
 		case GST_EVENT_EOS:
 		{
 			gsize avail_size;

@@ -121,6 +121,11 @@ static gboolean gst_umx_parse_sink_event(GstPad *pad, GstObject *parent, GstEven
 
 	switch(GST_EVENT_TYPE(event))
 	{
+		case GST_EVENT_SEGMENT:
+			/* Upstream sends in a byte segment, which is uninteresting here,
+			 * since a custom segment event is generated anyway */
+			gst_event_unref(event);
+			return TRUE;
 		case GST_EVENT_EOS:
 		{
 			umx_parse->upstream_eos = TRUE;
@@ -216,6 +221,7 @@ static GstFlowReturn gst_umx_parse_read(GstUmxParse *umx_parse, GstBuffer *umx_d
 	GstBuffer *module_data;
 	umx_index offset, size;
 	GstMapInfo in_map;
+	GstSegment segment;
 
 
 	if (umx_parse->module_data_size > 0)
@@ -398,6 +404,10 @@ static GstFlowReturn gst_umx_parse_read(GstUmxParse *umx_parse, GstBuffer *umx_d
 
 	gst_pad_push_event(umx_parse->srcpad, gst_event_new_caps(caps));
 	gst_caps_unref(caps);
+
+	gst_segment_init(&segment, GST_FORMAT_BYTES);
+	segment.duration = size;
+	gst_pad_push_event(umx_parse->srcpad, gst_event_new_segment(&segment));
 
 	module_data = gst_buffer_copy_region(umx_data, GST_BUFFER_COPY_MEMORY, offset, size);
 	umx_parse->module_data_size = size;
