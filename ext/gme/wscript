@@ -151,7 +151,7 @@ def build(bld):
 		gme_source = gme_source + ['gme_custom_dprintf.c']
 
 	gme_path = 'Game_Music_Emu-git/gme'
-	gme_source_2 = map(lambda x: gme_path + '/' + x , gme_source)
+	gme_source_2 = list(map(lambda x: gme_path + '/' + x , gme_source))
 	gme_source_2 += ['extra/Data_Reader.cpp']
 
 	bld(
