@@ -240,6 +240,9 @@ static gboolean gst_openmpt_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, 
 		if (metadata && *metadata) \
 		{ \
 			gst_tag_list_add(tags, GST_TAG_MERGE_REPLACE, (TAG_TYPE), metadata, NULL); \
+		} \
+		if (metadata) \
+		{ \
 			openmpt_free_string(metadata); \
 		}
 
