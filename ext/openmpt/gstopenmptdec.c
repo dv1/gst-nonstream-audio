@@ -107,14 +107,9 @@ void gst_openmpt_dec_class_init(GstOpenMptDecClass *klass)
 void gst_openmpt_dec_init(GstOpenMptDec *openmpt_dec)
 {
 	openmpt_dec->mod = NULL;
-	openmpt_dec->left = g_try_malloc(NUM_SAMPLES_PER_OUTBUF * sizeof(int16_t));
-	openmpt_dec->right = g_try_malloc(NUM_SAMPLES_PER_OUTBUF * sizeof(int16_t));
 	openmpt_dec->cur_subsong = 0;
 	openmpt_dec->num_subsongs = 0;
 	openmpt_dec->subsong_durations = NULL;
-
-	if ((openmpt_dec->left == NULL) || (openmpt_dec->right == NULL))
-		GST_ELEMENT_ERROR(openmpt_dec, RESOURCE, NO_SPACE_LEFT, ("could not allocate sample buffers"), (NULL));
 }
 
 
@@ -129,9 +124,6 @@ static void gst_openmpt_dec_finalize(GObject *object)
 		openmpt_module_destroy(openmpt_dec->mod);
 
 	g_free(openmpt_dec->subsong_durations);
-
-	g_free(openmpt_dec->left);
-	g_free(openmpt_dec->right);
 
 	G_OBJECT_CLASS(gst_openmpt_dec_parent_class)->finalize(object);
 }
@@ -331,8 +323,8 @@ static gboolean gst_openmpt_dec_decode(GstNonstreamAudioDecoder *dec, GstBuffer 
 	GstOpenMptDec *openmpt_dec;
 	GstBuffer *outbuf;
 	GstMapInfo map;
-	size_t num_read_samples, i;
-	int16_t *out_sample;
+	size_t num_read_samples;
+	int16_t *out_samples;
 
 	openmpt_dec = GST_OPENMPT_DEC(dec);
 
@@ -340,19 +332,15 @@ static gboolean gst_openmpt_dec_decode(GstNonstreamAudioDecoder *dec, GstBuffer 
 	if (G_UNLIKELY(outbuf == NULL))
 		return FALSE;
 
-	num_read_samples = openmpt_module_read_stereo(openmpt_dec->mod, openmpt_dec->sample_rate, NUM_SAMPLES_PER_OUTBUF, openmpt_dec->left, openmpt_dec->right);
+	gst_buffer_map(outbuf, &map, GST_MAP_WRITE);
+	out_samples = (int16_t*)(map.data);
+
+	num_read_samples = openmpt_module_read_interleaved_stereo(openmpt_dec->mod, openmpt_dec->sample_rate, NUM_SAMPLES_PER_OUTBUF, out_samples);
+
+	gst_buffer_unmap(outbuf, &map);
 
 	if (num_read_samples == 0)
 		return FALSE;
-
-	gst_buffer_map(outbuf, &map, GST_MAP_WRITE);
-	out_sample = (int16_t*)(map.data);
-	for (i = 0; i < num_read_samples; ++i)
-	{
-		*out_sample++ = openmpt_dec->left[i];
-		*out_sample++ = openmpt_dec->right[i];
-	}
-	gst_buffer_unmap(outbuf, &map);
 
 	*buffer = outbuf;
 	*num_samples = num_read_samples;
