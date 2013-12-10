@@ -8,6 +8,21 @@ GST_DEBUG_CATEGORY_STATIC(openmptdec_debug);
 #define GST_CAT_DEFAULT openmptdec_debug
 
 
+enum
+{
+	PROP_0,
+	PROP_MASTER_GAIN,
+	PROP_STEREO_SEPARATION,
+	PROP_FILTER_LENGTH,
+	PROP_VOLUME_RAMPING
+};
+
+
+#define DEFAULT_MASTER_GAIN 0
+#define DEFAULT_STEREO_SEPARATION 100
+#define DEFAULT_FILTER_LENGTH 0
+#define DEFAULT_VOLUME_RAMPING -1
+
 
 #define NUM_SAMPLES_PER_OUTBUF 1024
 
@@ -48,6 +63,9 @@ G_DEFINE_TYPE(GstOpenMptDec, gst_openmpt_dec, GST_TYPE_NONSTREAM_AUDIO_DECODER)
 
 static void gst_openmpt_dec_finalize(GObject *object);
 
+static void gst_openmpt_dec_set_property(GObject *object, guint prop_id, const GValue *value, GParamSpec *pspec);
+static void gst_openmpt_dec_get_property(GObject *object, guint prop_id, GValue *value, GParamSpec *pspec);
+
 static gboolean gst_openmpt_dec_seek(GstNonstreamAudioDecoder *dec, GstClockTime new_position);
 static GstClockTime gst_openmpt_dec_tell(GstNonstreamAudioDecoder *dec);
 
@@ -85,6 +103,8 @@ void gst_openmpt_dec_class_init(GstOpenMptDecClass *klass)
 	gst_element_class_add_pad_template(element_class, gst_static_pad_template_get(&src_template));
 
 	object_class->finalize = GST_DEBUG_FUNCPTR(gst_openmpt_dec_finalize);
+	object_class->set_property = GST_DEBUG_FUNCPTR(gst_openmpt_dec_set_property);
+	object_class->get_property = GST_DEBUG_FUNCPTR(gst_openmpt_dec_get_property);
 
 	dec_class->seek = GST_DEBUG_FUNCPTR(gst_openmpt_dec_seek);
 	dec_class->tell = GST_DEBUG_FUNCPTR(gst_openmpt_dec_tell);
@@ -106,6 +126,55 @@ void gst_openmpt_dec_class_init(GstOpenMptDecClass *klass)
 		"Plays module files (MOD/S3M/XM/IT/MTM/...) using OpenMPT",
 		"Carlos Rafael Giani <dv@pseudoterminal.org>"
 	);
+
+	g_object_class_install_property(
+		object_class,
+		PROP_MASTER_GAIN,
+		g_param_spec_int(
+			"master-gain",
+			"Master gain",
+			"Gain to apply to the playback, in millibel",
+			-G_MAXINT, G_MAXINT,
+			DEFAULT_MASTER_GAIN,
+			G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS
+		)
+	);
+	g_object_class_install_property(
+		object_class,
+		PROP_STEREO_SEPARATION,
+		g_param_spec_int(
+			"stereo-separation",
+			"Stereo separation",
+			"Degree of separation for stereo channels, in percent",
+			0, 400,
+			DEFAULT_STEREO_SEPARATION,
+			G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS
+		)
+	);
+	g_object_class_install_property(
+		object_class,
+		PROP_FILTER_LENGTH,
+		g_param_spec_int(
+			"filter-length",
+			"Filter length",
+			"Length of interpolation filter to use for the samples (0 = internal default)",
+			0, 8,
+			DEFAULT_FILTER_LENGTH,
+			G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS
+		)
+	);
+	g_object_class_install_property(
+		object_class,
+		PROP_VOLUME_RAMPING,
+		g_param_spec_int(
+			"volume-ramping",
+			"Volume ramping",
+			"Volume ramping strength; higher value -> slower ramping (-1 = internal default)",
+			-1, 10,
+			DEFAULT_VOLUME_RAMPING,
+			G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS
+		)
+	);
 }
 
 
@@ -116,6 +185,11 @@ void gst_openmpt_dec_init(GstOpenMptDec *openmpt_dec)
 	openmpt_dec->num_subsongs = 0;
 	openmpt_dec->subsong_durations = NULL;
 	openmpt_dec->num_loops = 0;
+
+	openmpt_dec->master_gain = DEFAULT_MASTER_GAIN;
+	openmpt_dec->stereo_separation = DEFAULT_STEREO_SEPARATION;
+	openmpt_dec->filter_length = DEFAULT_FILTER_LENGTH;
+	openmpt_dec->volume_ramping = DEFAULT_VOLUME_RAMPING;
 }
 
 
@@ -132,6 +206,92 @@ static void gst_openmpt_dec_finalize(GObject *object)
 	g_free(openmpt_dec->subsong_durations);
 
 	G_OBJECT_CLASS(gst_openmpt_dec_parent_class)->finalize(object);
+}
+
+
+static void gst_openmpt_dec_set_property(GObject *object, guint prop_id, const GValue *value, GParamSpec *pspec)
+{
+	GstNonstreamAudioDecoder *dec;
+	GstOpenMptDec *openmpt_dec;
+
+	dec = GST_NONSTREAM_AUDIO_DECODER(object);
+	openmpt_dec = GST_OPENMPT_DEC(object);
+
+	switch (prop_id)
+	{
+		case PROP_MASTER_GAIN:
+		{
+			GST_NONSTREAM_AUDIO_DECODER_STREAM_LOCK(dec);
+			openmpt_dec->master_gain = g_value_get_int(value);
+			if (openmpt_dec->mod != NULL)
+				openmpt_module_set_render_param(openmpt_dec->mod, OPENMPT_MODULE_RENDER_MASTERGAIN_MILLIBEL, openmpt_dec->master_gain);
+			GST_NONSTREAM_AUDIO_DECODER_STREAM_UNLOCK(dec);
+			break;
+		}
+		case PROP_STEREO_SEPARATION:
+		{
+			GST_NONSTREAM_AUDIO_DECODER_STREAM_LOCK(dec);
+			openmpt_dec->stereo_separation = g_value_get_int(value);
+			if (openmpt_dec->mod != NULL)
+				openmpt_module_set_render_param(openmpt_dec->mod, OPENMPT_MODULE_RENDER_STEREOSEPARATION_PERCENT, openmpt_dec->stereo_separation);
+			GST_NONSTREAM_AUDIO_DECODER_STREAM_UNLOCK(dec);
+			break;
+		}
+		case PROP_FILTER_LENGTH:
+		{
+			GST_NONSTREAM_AUDIO_DECODER_STREAM_LOCK(dec);
+			openmpt_dec->filter_length = g_value_get_int(value);
+			if (openmpt_dec->mod != NULL)
+				openmpt_module_set_render_param(openmpt_dec->mod, OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH, openmpt_dec->filter_length);
+			GST_NONSTREAM_AUDIO_DECODER_STREAM_UNLOCK(dec);
+			break;
+		}
+		case PROP_VOLUME_RAMPING:
+		{
+			GST_NONSTREAM_AUDIO_DECODER_STREAM_LOCK(dec);
+			openmpt_dec->volume_ramping = g_value_get_int(value);
+			if (openmpt_dec->mod != NULL)
+				openmpt_module_set_render_param(openmpt_dec->mod, OPENMPT_MODULE_RENDER_VOLUMERAMPING_STRENGTH, openmpt_dec->volume_ramping);
+			GST_NONSTREAM_AUDIO_DECODER_STREAM_UNLOCK(dec);
+			break;
+		}
+		default:
+			G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
+			break;
+	}
+}
+
+
+static void gst_openmpt_dec_get_property(GObject *object, guint prop_id, GValue *value, GParamSpec *pspec)
+{
+	GstOpenMptDec *openmpt_dec = GST_OPENMPT_DEC(object);
+
+	switch (prop_id)
+	{
+		case PROP_MASTER_GAIN:
+		{
+			g_value_set_int(value, openmpt_dec->master_gain);
+			break;
+		}
+		case PROP_STEREO_SEPARATION:
+		{
+			g_value_set_int(value, openmpt_dec->stereo_separation);
+			break;
+		}
+		case PROP_FILTER_LENGTH:
+		{
+			g_value_set_int(value, openmpt_dec->filter_length);
+			break;
+		}
+		case PROP_VOLUME_RAMPING:
+		{
+			g_value_set_int(value, openmpt_dec->volume_ramping);
+			break;
+		}
+		default:
+			G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
+			break;
+	}
 }
 
 
@@ -235,6 +395,10 @@ static gboolean gst_openmpt_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, 
 
 	openmpt_module_select_subsong(openmpt_dec->mod, initial_subsong);
 	openmpt_module_set_repeat_count(openmpt_dec->mod, openmpt_dec->num_loops);
+	openmpt_module_set_render_param(openmpt_dec->mod, OPENMPT_MODULE_RENDER_MASTERGAIN_MILLIBEL, openmpt_dec->master_gain);
+	openmpt_module_set_render_param(openmpt_dec->mod, OPENMPT_MODULE_RENDER_STEREOSEPARATION_PERCENT, openmpt_dec->stereo_separation);
+	openmpt_module_set_render_param(openmpt_dec->mod, OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH, openmpt_dec->filter_length);
+	openmpt_module_set_render_param(openmpt_dec->mod, OPENMPT_MODULE_RENDER_VOLUMERAMPING_STRENGTH, openmpt_dec->volume_ramping);
 
 	{
 		GstTagList *tags;
