@@ -65,7 +65,7 @@ static GstStaticPadTemplate src_template = GST_STATIC_PAD_TEMPLATE(
 		"format = (string) " GST_AUDIO_NE(S16) ", "
 		"layout = (string) interleaved, "
 		"rate = (int) [ 1, 48000 ], "
-		"channels = (int) [ 1, 2 ] "
+		"channels = (int) { 2, 1 } "
 	)
 );
 
