@@ -23,6 +23,10 @@ enum
 #define DEFAULT_FILTER_LENGTH 0
 #define DEFAULT_VOLUME_RAMPING -1
 
+#define DEFAULT_SAMPLE_FORMAT GST_AUDIO_FORMAT_F32
+#define DEFAULT_SAMPLE_RATE 48000
+#define DEFAULT_NUM_CHANNELS 2
+
 
 #define NUM_SAMPLES_PER_OUTBUF 1024
 
@@ -48,10 +52,10 @@ static GstStaticPadTemplate src_template = GST_STATIC_PAD_TEMPLATE(
 	GST_PAD_ALWAYS,
 	GST_STATIC_CAPS(
 		"audio/x-raw, "
-		"format = (string) " GST_AUDIO_NE(S16) ", "
+		"format = (string) { " GST_AUDIO_NE(F32) ", " GST_AUDIO_NE(S16) " }, "
 		"layout = (string) interleaved, "
 		"rate = (int) [ 1, 48000 ], "
-		"channels = (int) 2 "
+		"channels = (int) { 2, 4, 1 } "
 	)
 );
 
@@ -181,15 +185,21 @@ void gst_openmpt_dec_class_init(GstOpenMptDecClass *klass)
 void gst_openmpt_dec_init(GstOpenMptDec *openmpt_dec)
 {
 	openmpt_dec->mod = NULL;
+
 	openmpt_dec->cur_subsong = 0;
 	openmpt_dec->num_subsongs = 0;
 	openmpt_dec->subsong_durations = NULL;
+
 	openmpt_dec->num_loops = 0;
 
 	openmpt_dec->master_gain = DEFAULT_MASTER_GAIN;
 	openmpt_dec->stereo_separation = DEFAULT_STEREO_SEPARATION;
 	openmpt_dec->filter_length = DEFAULT_FILTER_LENGTH;
 	openmpt_dec->volume_ramping = DEFAULT_VOLUME_RAMPING;
+
+	openmpt_dec->sample_format = DEFAULT_SAMPLE_FORMAT;
+	openmpt_dec->sample_rate = DEFAULT_SAMPLE_RATE;
+	openmpt_dec->num_channels = DEFAULT_NUM_CHANNELS;
 }
 
 
@@ -328,15 +338,17 @@ static gboolean gst_openmpt_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, 
 	
 	openmpt_dec = GST_OPENMPT_DEC(dec);
 
-	openmpt_dec->sample_rate = 48000;
-	gst_nonstream_audio_decoder_get_downstream_info(dec, NULL, &(openmpt_dec->sample_rate), NULL);
+	openmpt_dec->sample_format = DEFAULT_SAMPLE_FORMAT;
+	openmpt_dec->sample_rate = DEFAULT_SAMPLE_RATE;
+	openmpt_dec->num_channels = DEFAULT_NUM_CHANNELS;
+	gst_nonstream_audio_decoder_get_downstream_info(dec, &(openmpt_dec->sample_format), &(openmpt_dec->sample_rate), &(openmpt_dec->num_channels));
 
 	/* Set output format */
 	if (!gst_nonstream_audio_decoder_set_output_audioinfo_simple(
 		dec,
 		openmpt_dec->sample_rate,
-		GST_AUDIO_FORMAT_S16,
-		2
+		openmpt_dec->sample_format,
+		openmpt_dec->num_channels
 	))
 		return FALSE;
 
@@ -517,18 +529,64 @@ static gboolean gst_openmpt_dec_decode(GstNonstreamAudioDecoder *dec, GstBuffer 
 	GstBuffer *outbuf;
 	GstMapInfo map;
 	size_t num_read_samples;
-	int16_t *out_samples;
+	GstAudioFormatInfo const *fmt_info;
 
 	openmpt_dec = GST_OPENMPT_DEC(dec);
 
-	outbuf = gst_nonstream_audio_decoder_allocate_output_buffer(dec, NUM_SAMPLES_PER_OUTBUF * 2 * 2);
+	fmt_info = gst_audio_format_get_info(openmpt_dec->sample_format);
+
+	outbuf = gst_nonstream_audio_decoder_allocate_output_buffer(dec, NUM_SAMPLES_PER_OUTBUF * (fmt_info->width / 8) * openmpt_dec->num_channels);
 	if (G_UNLIKELY(outbuf == NULL))
 		return FALSE;
 
 	gst_buffer_map(outbuf, &map, GST_MAP_WRITE);
-	out_samples = (int16_t*)(map.data);
 
-	num_read_samples = openmpt_module_read_interleaved_stereo(openmpt_dec->mod, openmpt_dec->sample_rate, NUM_SAMPLES_PER_OUTBUF, out_samples);
+	switch (openmpt_dec->sample_format)
+	{
+		case GST_AUDIO_FORMAT_S16:
+		{
+			int16_t *out_samples = (int16_t*)(map.data);
+			switch (openmpt_dec->num_channels)
+			{
+				case 1:
+					num_read_samples = openmpt_module_read_mono(openmpt_dec->mod, openmpt_dec->sample_rate, NUM_SAMPLES_PER_OUTBUF, out_samples);
+					break;
+				case 2:
+					num_read_samples = openmpt_module_read_interleaved_stereo(openmpt_dec->mod, openmpt_dec->sample_rate, NUM_SAMPLES_PER_OUTBUF, out_samples);
+					break;
+				case 4:
+					num_read_samples = openmpt_module_read_interleaved_quad(openmpt_dec->mod, openmpt_dec->sample_rate, NUM_SAMPLES_PER_OUTBUF, out_samples);
+					break;
+				default:
+					g_assert_not_reached();
+			}
+			break;
+		}
+		case GST_AUDIO_FORMAT_F32:
+		{
+			float *out_samples = (float*)(map.data);
+			switch (openmpt_dec->num_channels)
+			{
+				case 1:
+					num_read_samples = openmpt_module_read_float_mono(openmpt_dec->mod, openmpt_dec->sample_rate, NUM_SAMPLES_PER_OUTBUF, out_samples);
+					break;
+				case 2:
+					num_read_samples = openmpt_module_read_interleaved_float_stereo(openmpt_dec->mod, openmpt_dec->sample_rate, NUM_SAMPLES_PER_OUTBUF, out_samples);
+					break;
+				case 4:
+					num_read_samples = openmpt_module_read_interleaved_float_quad(openmpt_dec->mod, openmpt_dec->sample_rate, NUM_SAMPLES_PER_OUTBUF, out_samples);
+					break;
+				default:
+					g_assert_not_reached();
+			}
+			break;
+		}
+		default:
+		{
+			GST_ERROR_OBJECT(dec, "using unsupported sample format %s", fmt_info->name);
+			g_assert_not_reached();
+		}
+	}
 
 	gst_buffer_unmap(outbuf, &map);
 

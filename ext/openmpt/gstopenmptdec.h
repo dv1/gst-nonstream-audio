@@ -28,8 +28,13 @@ struct _GstOpenMptDec
 
 	guint cur_subsong, num_subsongs;
 	double *subsong_durations;
-	gint sample_rate, num_loops;
+
+	gint num_loops;
+
 	gint master_gain, stereo_separation, filter_length, volume_ramping;
+
+	GstAudioFormat sample_format;
+	gint sample_rate, num_channels;
 };
 
 
