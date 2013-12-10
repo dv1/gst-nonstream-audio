@@ -1622,7 +1622,11 @@ void gst_nonstream_audio_decoder_get_downstream_info(GstNonstreamAudioDecoder *d
 	/* Get the caps that are allowed by downstream */
 	{
 		GstCaps *allowed_srccaps_unnorm = gst_pad_get_allowed_caps(dec->srcpad);
+		GST_LOG_OBJECT(dec, "unnormalized allowed src caps: %" GST_PTR_FORMAT, (gpointer)allowed_srccaps_unnorm);
+
 		allowed_srccaps = gst_caps_normalize(allowed_srccaps_unnorm);
+
+		GST_LOG_OBJECT(dec, "normalized allowed src caps: %" GST_PTR_FORMAT, (gpointer)allowed_srccaps);
 	}
 
 	ds_format_found = FALSE;
