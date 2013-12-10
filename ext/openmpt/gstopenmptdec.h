@@ -28,7 +28,7 @@ struct _GstOpenMptDec
 
 	guint cur_subsong, num_subsongs;
 	double *subsong_durations;
-	gint sample_rate;
+	gint sample_rate, num_loops;
 };
 
 

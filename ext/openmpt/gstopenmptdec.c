@@ -61,6 +61,9 @@ static guint gst_openmpt_dec_get_num_subsongs(GstNonstreamAudioDecoder *dec);
 static GstClockTime gst_openmpt_dec_get_subsong_duration(GstNonstreamAudioDecoder *dec, guint subsong);
 static GstTagList* gst_openmpt_dec_get_subsong_tags(GstNonstreamAudioDecoder *dec, guint subsong);
 
+static gboolean gst_openmpt_dec_set_num_loops(GstNonstreamAudioDecoder *dec, gint num_loops);
+static gint gst_openmpt_dec_get_num_loops(GstNonstreamAudioDecoder *dec);
+
 static guint gst_openmpt_dec_get_supported_output_modes(GstNonstreamAudioDecoder *dec);
 static gboolean gst_openmpt_dec_decode(GstNonstreamAudioDecoder *dec, GstBuffer **buffer, guint *num_samples);
 
@@ -86,6 +89,8 @@ void gst_openmpt_dec_class_init(GstOpenMptDecClass *klass)
 	dec_class->seek = GST_DEBUG_FUNCPTR(gst_openmpt_dec_seek);
 	dec_class->tell = GST_DEBUG_FUNCPTR(gst_openmpt_dec_tell);
 	dec_class->load_from_buffer = GST_DEBUG_FUNCPTR(gst_openmpt_dec_load_from_buffer);
+	dec_class->set_num_loops = GST_DEBUG_FUNCPTR(gst_openmpt_dec_set_num_loops);
+	dec_class->get_num_loops = GST_DEBUG_FUNCPTR(gst_openmpt_dec_get_num_loops);
 	dec_class->get_supported_output_modes = GST_DEBUG_FUNCPTR(gst_openmpt_dec_get_supported_output_modes);
 	dec_class->decode = GST_DEBUG_FUNCPTR(gst_openmpt_dec_decode);
 	dec_class->set_current_subsong = GST_DEBUG_FUNCPTR(gst_openmpt_dec_set_current_subsong);
@@ -110,6 +115,7 @@ void gst_openmpt_dec_init(GstOpenMptDec *openmpt_dec)
 	openmpt_dec->cur_subsong = 0;
 	openmpt_dec->num_subsongs = 0;
 	openmpt_dec->subsong_durations = NULL;
+	openmpt_dec->num_loops = 0;
 }
 
 
@@ -228,6 +234,7 @@ static gboolean gst_openmpt_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, 
 	}
 
 	openmpt_module_select_subsong(openmpt_dec->mod, initial_subsong);
+	openmpt_module_set_repeat_count(openmpt_dec->mod, openmpt_dec->num_loops);
 
 	{
 		GstTagList *tags;
@@ -299,7 +306,7 @@ static GstTagList* gst_openmpt_dec_get_subsong_tags(GstNonstreamAudioDecoder *de
 {
 	GstOpenMptDec *openmpt_dec;
 	char const *name;
-	
+
 	openmpt_dec = GST_OPENMPT_DEC(dec);
 
 	name = openmpt_module_get_subsong_name(openmpt_dec->mod, subsong);
@@ -312,6 +319,25 @@ static GstTagList* gst_openmpt_dec_get_subsong_tags(GstNonstreamAudioDecoder *de
 	}
 	else
 		return NULL;
+}
+
+
+static gboolean gst_openmpt_dec_set_num_loops(GstNonstreamAudioDecoder *dec, gint num_loops)
+{
+	GstOpenMptDec *openmpt_dec = GST_OPENMPT_DEC(dec);
+	openmpt_dec->num_loops = num_loops;
+
+	if (openmpt_dec->mod != NULL)
+		return openmpt_module_set_repeat_count(openmpt_dec->mod, num_loops);
+	else
+		return TRUE;
+}
+
+
+static gint gst_openmpt_dec_get_num_loops(GstNonstreamAudioDecoder *dec)
+{
+	GstOpenMptDec *openmpt_dec = GST_OPENMPT_DEC(dec);
+	return openmpt_dec->num_loops;
 }
 
 
