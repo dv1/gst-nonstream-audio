@@ -42,7 +42,7 @@ plugins = {'dumb' : True, 'gme' : True, 'openmpt' : False, 'uade' : False}
 
 def options(opt):
 	opt.add_option('--enable-debug', action = 'store_true', default = False, help = 'enable debug build [default: %default]')
-	opt.add_option('--with-package-name', action = 'store', default = "gstmpg123 plug-in source release", help = 'specify package name to use in plugin [default: %default]')
+	opt.add_option('--with-package-name', action = 'store', default = "gstnonstreamaudio plug-in source release", help = 'specify package name to use in plugin [default: %default]')
 	opt.add_option('--with-package-origin', action = 'store', default = "Unknown package origin", help = 'specify package origin URL to use in plugin [default: %default]')
 	opt.add_option('--plugin-install-path', action = 'store', default = "${PREFIX}/lib/gstreamer-1.0", help = 'where to install the plugin for GStreamer 1.0 [default: %default]')
 	opt.load('compiler_c')

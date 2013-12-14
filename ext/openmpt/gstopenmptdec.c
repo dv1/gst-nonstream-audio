@@ -430,9 +430,9 @@ static gboolean gst_openmpt_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, 
 		}
 
 		GSTOPENMPT_ADD_TO_TAGS("title", GST_TAG_TITLE);
-		GSTOPENMPT_ADD_TO_TAGS("author", GST_TAG_ARTIST);
-		GSTOPENMPT_ADD_TO_TAGS("tracker", GST_TAG_ENCODER);
+		GSTOPENMPT_ADD_TO_TAGS("artist", GST_TAG_ARTIST);
 		GSTOPENMPT_ADD_TO_TAGS("message", GST_TAG_COMMENT);
+		GSTOPENMPT_ADD_TO_TAGS("tracker", GST_TAG_APPLICATION_NAME);
 
 #undef GSTOPENMPT_ADD_TO_TAGS
 
