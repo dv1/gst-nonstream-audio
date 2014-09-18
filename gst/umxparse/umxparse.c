@@ -109,7 +109,7 @@ static void gst_umx_parse_finalize(GObject *object)
 {
 	GstUmxParse *umx_parse = GST_UMX_PARSE(object);
 
-	g_object_unref(umx_parse->adapter);
+	g_object_unref(G_OBJECT(umx_parse->adapter));
 
 	G_OBJECT_CLASS(gst_umx_parse_parent_class)->finalize(object);
 }
@@ -126,12 +126,14 @@ static gboolean gst_umx_parse_sink_event(GstPad *pad, GstObject *parent, GstEven
 			 * since a custom segment event is generated anyway */
 			gst_event_unref(event);
 			return TRUE;
+
 		case GST_EVENT_EOS:
 		{
 			umx_parse->upstream_eos = TRUE;
 			gst_event_unref(event);
 			return TRUE;
 		}
+
 		default:
 			return gst_pad_event_default(pad, parent, event);
 	}
@@ -184,15 +186,15 @@ static gboolean gst_umx_parse_src_query(GstPad *pad, GstObject *parent, GstQuery
 		case GST_QUERY_DURATION:
 		{
 			gst_query_parse_duration(query, &format, NULL);
-			GST_TRACE_OBJECT(umx_parse, "got duration query, format: %s", gst_format_get_name(format));
+			GST_DEBUG_OBJECT(umx_parse, "got duration query, format: %s", gst_format_get_name(format));
 			if ((format == GST_FORMAT_BYTES) && (umx_parse->module_data_size >= 0))
 			{
-				GST_TRACE_OBJECT(umx_parse, "responding to query with size %" G_GINT64_FORMAT, umx_parse->module_data_size);
+				GST_DEBUG_OBJECT(umx_parse, "responding to query with size %" G_GINT64_FORMAT, umx_parse->module_data_size);
 				gst_query_set_duration(query, format, umx_parse->module_data_size);
 				res = TRUE;
 			}
 			else
-				GST_TRACE_OBJECT(umx_parse, "cannot respond to query, no size set or query format is not in bytes");
+				GST_DEBUG_OBJECT(umx_parse, "cannot respond to query, no size set or query format is not in bytes");
 
 			break;
 		}
