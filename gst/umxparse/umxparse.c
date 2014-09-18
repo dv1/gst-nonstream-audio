@@ -255,6 +255,13 @@ static GstBuffer* gst_umx_parse_read(GstUmxParse *umx_parse, GstBuffer *umx_data
 	GstMapInfo in_map;
 
 
+	/* The UMX parser was written using these specifications and examples:
+	 * http://wiki.beyondunreal.com/Legacy:Package_File_Format
+	 * http://wiki.beyondunreal.com/Unreal_package
+	 * http://sourceforge.net/p/modplug/code/HEAD/tree/trunk/OpenMPT/soundlib/Load_umx.cpp
+	 */
+
+
 	gst_buffer_map(umx_data, &in_map, GST_MAP_READ);
 
 	{
@@ -265,8 +272,12 @@ static GstBuffer* gst_umx_parse_read(GstUmxParse *umx_parse, GstBuffer *umx_data
 		guint32 magic_id, num_names, names_offset, num_exports, exports_offset, num_imports, imports_offset;
 		guint16 pkg_version;
 		guint32 i;
+
+		/* bufofs is the current "read" position in the buffer
+		 * "seeking" is done by manipulating its value */
 		gsize bufofs = 0;
 
+		/* read the 32-bit integer  magic ID to identify an Unreal package */
 		magic_id = GST_READ_UINT32_LE(in_map.data); bufofs += 4;
 		if (magic_id != expected_magic_id)
 		{
@@ -275,12 +286,14 @@ static GstBuffer* gst_umx_parse_read(GstUmxParse *umx_parse, GstBuffer *umx_data
 			return NULL;
 		}
 
+		/* read the 16-bit integer package version (needed below) */
 		pkg_version = GST_READ_UINT16_LE(in_map.data + bufofs); bufofs += 2;
 		GST_DEBUG_OBJECT(umx_parse, "package version: %u", pkg_version);
 
-		bufofs += 2;
-		bufofs += 4;
+		bufofs += 2; /* 16-bit integer containing license mode; uninteresting, skip */
+		bufofs += 4; /* 32-bit integer containing package flags; uninteresting, skip */
 
+		/* offset of tables and number of entries in tables */
 		num_names      = GST_READ_UINT32_LE(in_map.data + bufofs); bufofs += 4;
 		names_offset   = GST_READ_UINT32_LE(in_map.data + bufofs); bufofs += 4;
 		num_exports    = GST_READ_UINT32_LE(in_map.data + bufofs); bufofs += 4;
@@ -298,6 +311,9 @@ static GstBuffer* gst_umx_parse_read(GstUmxParse *umx_parse, GstBuffer *umx_data
 		names = g_slice_alloc(sizeof(gchar*) * num_names);
 		imports = g_slice_alloc(sizeof(umx_import) * num_imports);
 
+		/* read all names from the name table
+		 * the name table associates an index (the array index) with a string
+		 * so, name[i] = "foo"; associates "foo" with index i */
 		bufofs = names_offset;
 		for (i = 0; i < num_names; ++i)
 		{
@@ -316,6 +332,9 @@ static GstBuffer* gst_umx_parse_read(GstUmxParse *umx_parse, GstBuffer *umx_data
 			GST_DEBUG_OBJECT(umx_parse, "name #%u: \"%s\"", i, names[i]);
 		}
 
+		/* read all imports from the import table
+		 * it is needed for identifying the module type
+		 * and to verify that the data is of type "Music" */
 		bufofs = imports_offset;
 		for (i = 0; i < num_imports; ++i)
 		{
@@ -326,9 +345,13 @@ static GstBuffer* gst_umx_parse_read(GstUmxParse *umx_parse, GstBuffer *umx_data
 			im->object_name = gst_umx_parse_read_index(in_map.data, &bufofs);
 		}
 
+		/* these two variables will contain the offset where the module
+		 * music block is and how large it is */
 		offset = 0;
 		size = 0;
 
+		/* read all exports from the export table
+		 * the export table is where the actual data is contained */
 		bufofs = exports_offset;
 		for (i = 0; i < num_exports; ++i)
 		{
@@ -348,20 +371,25 @@ static GstBuffer* gst_umx_parse_read(GstUmxParse *umx_parse, GstBuffer *umx_data
 
 			serial_offset = gst_umx_parse_read_index(in_map.data, &bufofs);
 
+			/* verify that the data is a valid music block */
 			im_idx = -umx_class - 1;
 			im = &(imports[im_idx]);
 			name = names[im->object_name];
 
+			/* data blocks other than Music are not relevant */
 			if (g_strcmp0(name, "Music") != 0)
 				continue;
 
+			/* retrieve the module type */
 			mod_type = names[0];
 
+			/* skip to the serialized data */
 			bufofs = serial_offset;
 
 			gst_umx_parse_read_index(in_map.data, &bufofs); /* skip number of properties */
-			/* Skip unused data, depending on the package version
-			 * Taken from OpenMPT's Load_umx.cpp */
+
+			/* skip unused data, depending on the package version
+			 * taken from OpenMPT's Load_umx.cpp */
 			if (pkg_version >= 120)
 			{
 				/* UT2003 packages */
@@ -393,6 +421,8 @@ static GstBuffer* gst_umx_parse_read(GstUmxParse *umx_parse, GstBuffer *umx_data
 
 			chunk_size = gst_umx_parse_read_index(in_map.data, &bufofs);
 
+			/* finally, these are the offset and the size of the
+			 * actual module data within the Unreal package */
 			offset = bufofs;
 			size = chunk_size;
 
@@ -409,6 +439,7 @@ static GstBuffer* gst_umx_parse_read(GstUmxParse *umx_parse, GstBuffer *umx_data
 			break;
 		}
 
+		/* cleanup */
 		g_slice_free1(sizeof(gchar*) * num_names, names);
 		g_slice_free1(sizeof(umx_import) * num_imports, imports);
 
@@ -426,6 +457,7 @@ static GstBuffer* gst_umx_parse_read(GstUmxParse *umx_parse, GstBuffer *umx_data
 	/* unmapping AFTER creating caps, since otherwise mod_type would be invalid */
 	gst_buffer_unmap(umx_data, &in_map);
 
+	/* copy region within the umx data which contains the actual module */
 	return gst_buffer_copy_region(umx_data, GST_BUFFER_COPY_MEMORY, offset, size);
 }
 
