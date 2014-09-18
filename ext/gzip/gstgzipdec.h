@@ -3,6 +3,7 @@
 
 #include <gst/gst.h>
 #include <gst/base/gstadapter.h>
+#include <zlib.h>
 
 
 G_BEGIN_DECLS
@@ -22,15 +23,14 @@ typedef struct _GstGZipDecClass GstGZipDecClass;
 struct _GstGZipDec
 {
 	GstElement parent;
-
 	GstPad *sinkpad, *srcpad;
 
-	gboolean upstream_eos;
-	gint64 decompressed_size;
+	z_stream strm;
 
-	/* these two values are used in push mode only, for loading */
-	GstAdapter *in_adapter;
-	gint64 upstream_size;
+	GstAdapter *adapter;
+	gboolean typefind_done;
+	gboolean compressed_size_requested, compressed_size_known;
+	gint64 compressed_size, uncompressed_size;
 };
 
 
