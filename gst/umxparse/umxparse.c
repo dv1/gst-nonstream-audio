@@ -129,7 +129,7 @@ static gboolean gst_umx_parse_sink_event(GstPad *pad, GstObject *parent, GstEven
 		case GST_EVENT_EOS:
 		{
 			umx_parse->upstream_eos = TRUE;
-
+			gst_event_unref(event);
 			return TRUE;
 		}
 		default:
