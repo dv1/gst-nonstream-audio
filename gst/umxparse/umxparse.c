@@ -55,7 +55,7 @@ static gboolean gst_umx_parse_src_query(GstPad *pad, GstObject *parent, GstQuery
 
 static gboolean gst_umx_parse_get_upstream_size(GstUmxParse *umx_parse, gint64 *length);
 
-static GstFlowReturn gst_umx_parse_read(GstUmxParse *umx_parse, GstBuffer *umx_data);
+static GstBuffer* gst_umx_parse_read(GstUmxParse *umx_parse, GstBuffer *umx_data, GstCaps **caps);
 static umx_index gst_umx_parse_read_index(guint8 *data, gsize *bufofs);
 
 
@@ -164,9 +164,42 @@ static GstFlowReturn gst_umx_parse_chain(G_GNUC_UNUSED GstPad *pad, GstObject *p
 	avail_size = gst_adapter_available(umx_parse->adapter);
 	if (umx_parse->upstream_eos || (avail_size >= umx_parse->upstream_size))
 	{
-		GstBuffer *adapter_buffer = gst_adapter_take_buffer(umx_parse->adapter, avail_size);
+		GstFlowReturn flow_ret;
+		GstCaps *caps;
+		GstSegment segment;
+		GstBuffer *adapter_buffer, *module_data;
 
-		return gst_umx_parse_read(umx_parse, adapter_buffer);
+		/* Take all data from the adapter */
+		adapter_buffer = gst_adapter_take_buffer(umx_parse->adapter, avail_size);
+		module_data = gst_umx_parse_read(umx_parse, adapter_buffer, &caps);
+		gst_buffer_unref(adapter_buffer);
+
+		if (module_data == NULL)
+			return GST_FLOW_ERROR;
+
+		/* Record module data size for duration queries */
+		umx_parse->module_data_size = gst_buffer_get_size(module_data);
+
+		/* Send new caps downstream */
+		gst_pad_push_event(umx_parse->srcpad, gst_event_new_caps(caps));
+		gst_caps_unref(caps);
+
+		/* Start new segment */
+		gst_segment_init(&segment, GST_FORMAT_BYTES);
+		segment.duration = umx_parse->module_data_size;
+		gst_pad_push_event(umx_parse->srcpad, gst_event_new_segment(&segment));
+
+		/* Push the actual module data downstream */
+		flow_ret = gst_pad_push(umx_parse->srcpad, module_data);
+		if (flow_ret != GST_FLOW_OK)
+		{
+			GST_ERROR_OBJECT(umx_parse, "failed to push module data downstream: %s (%d)", gst_flow_get_name(flow_ret), flow_ret);
+			return flow_ret;
+		}
+
+		/* Finish delivery with an EOS event (since all data
+		 * that could be transmitted has been transmitted) */
+		gst_pad_push_event(umx_parse->srcpad, gst_event_new_eos());
 	}
 
 	return GST_FLOW_OK;
@@ -215,23 +248,11 @@ static gboolean gst_umx_parse_get_upstream_size(GstUmxParse *umx_parse, gint64 *
 }
 
 
-static GstFlowReturn gst_umx_parse_read(GstUmxParse *umx_parse, GstBuffer *umx_data)
+static GstBuffer* gst_umx_parse_read(GstUmxParse *umx_parse, GstBuffer *umx_data, GstCaps **caps)
 {
-	GstFlowReturn ret;
-	GstCaps *caps;
 	gchar *mod_type;
-	GstBuffer *module_data;
 	umx_index offset, size;
 	GstMapInfo in_map;
-	GstSegment segment;
-
-
-	if (umx_parse->module_data_size > 0)
-	{
-		/* UMX music data was already read at this point - exit */
-		GST_DEBUG_OBJECT(umx_parse, "UMX music data already read, ignoring read call");
-		return GST_FLOW_OK;
-	}
 
 
 	gst_buffer_map(umx_data, &in_map, GST_MAP_READ);
@@ -251,7 +272,7 @@ static GstFlowReturn gst_umx_parse_read(GstUmxParse *umx_parse, GstBuffer *umx_d
 		{
 			gst_buffer_unmap(umx_data, &in_map);
 			GST_ERROR_OBJECT(umx_parse, "expected signature 0x%x, found 0x%x", expected_magic_id, magic_id);
-			return GST_FLOW_ERROR;
+			return NULL;
 		}
 
 		pkg_version = GST_READ_UINT16_LE(in_map.data + bufofs); bufofs += 2;
@@ -395,35 +416,17 @@ static GstFlowReturn gst_umx_parse_read(GstUmxParse *umx_parse, GstBuffer *umx_d
 		{
 			GST_ERROR_OBJECT(umx_parse, "no valid music data found");
 			gst_buffer_unmap(umx_data, &in_map);
-			return GST_FLOW_ERROR;
+			return NULL;
 		}
 	}
 
-	caps = gst_caps_new_simple("audio/x-mod", "type", G_TYPE_STRING, mod_type, NULL);
+	if (caps != NULL)
+		*caps = gst_caps_new_simple("audio/x-mod", "type", G_TYPE_STRING, mod_type, NULL);
 
 	/* unmapping AFTER creating caps, since otherwise mod_type would be invalid */
 	gst_buffer_unmap(umx_data, &in_map);
 
-	gst_pad_push_event(umx_parse->srcpad, gst_event_new_caps(caps));
-	gst_caps_unref(caps);
-
-	gst_segment_init(&segment, GST_FORMAT_BYTES);
-	segment.duration = size;
-	gst_pad_push_event(umx_parse->srcpad, gst_event_new_segment(&segment));
-
-	module_data = gst_buffer_copy_region(umx_data, GST_BUFFER_COPY_MEMORY, offset, size);
-	umx_parse->module_data_size = size;
-
-	ret = gst_pad_push(umx_parse->srcpad, module_data);
-	if (ret != GST_FLOW_OK)
-	{
-		GST_ERROR_OBJECT(umx_parse, "failed to push module data downstream: %s (%d)", gst_flow_get_name(ret), ret);
-		return ret;
-	}
-
-	gst_pad_push_event(umx_parse->srcpad, gst_event_new_eos());
-
-	return GST_FLOW_OK;
+	return gst_buffer_copy_region(umx_data, GST_BUFFER_COPY_MEMORY, offset, size);
 }
 
 
