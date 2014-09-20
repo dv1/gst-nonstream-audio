@@ -62,7 +62,7 @@ static void gst_uade_raw_dec_finalize(GObject *object);
 static void gst_uade_raw_dec_set_property(GObject *object, guint prop_id, const GValue *value, GParamSpec *pspec);
 static void gst_uade_raw_dec_get_property(GObject *object, guint prop_id, GValue *value, GParamSpec *pspec);
 
-static gboolean gst_uade_raw_dec_load_from_custom(GstNonstreamAudioDecoder *dec, guint initial_subsong, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode);
+static gboolean gst_uade_raw_dec_load_from_custom(GstNonstreamAudioDecoder *dec, guint initial_subsong, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode, gint *initial_num_loops);
 
 static gboolean gst_uade_raw_dec_set_current_subsong(GstNonstreamAudioDecoder *dec, guint subsong, GstClockTime *initial_position);
 static guint gst_uade_raw_dec_get_current_subsong(GstNonstreamAudioDecoder *dec);
@@ -274,6 +274,7 @@ static void gst_uade_raw_dec_set_property(GObject *object, guint prop_id, const 
 		if (uade_raw_dec->state != NULL) \
 		{ \
 			GST_ERROR_OBJECT(uade_raw_dec, "changes to the %s property after playback already started are not supported", g_param_spec_get_name(pspec)); \
+			GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(object); \
 			return; \
 		} \
 	} while (0)
@@ -292,49 +293,77 @@ static void gst_uade_raw_dec_set_property(GObject *object, guint prop_id, const 
 	switch (prop_id)
 	{
 		case PROP_LOCATION:
+			GST_NONSTREAM_AUDIO_DECODER_LOCK_MUTEX(object);
 			if (uade_raw_dec->location != NULL)
 			{
+				GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(object);
 				GST_ERROR_OBJECT(uade_raw_dec, "a music file is already opened; reopening is not supported");
 				return;
 			}
 			uade_raw_dec->location = g_strdup(g_value_get_string(value));
+			GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(object);
 			break;
+
 		case PROP_UADECORE_FILE:
+			GST_NONSTREAM_AUDIO_DECODER_LOCK_MUTEX(object);
 			CHECK_IF_ALREADY_INITIALIZED();
 			g_free(uade_raw_dec->uadecore_file);
 			uade_raw_dec->uadecore_file = g_strdup(g_value_get_string(value));
+			GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(object);
 			break;
+
 		case PROP_BASE_DIRECTORY:
+			GST_NONSTREAM_AUDIO_DECODER_LOCK_MUTEX(object);
 			CHECK_IF_ALREADY_INITIALIZED();
 			g_free(uade_raw_dec->base_directory);
 			uade_raw_dec->base_directory = g_strdup(g_value_get_string(value));
+			GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(object);
 			break;
+
 		case PROP_FILTER_TYPE:
+			GST_NONSTREAM_AUDIO_DECODER_LOCK_MUTEX(object);
 			CHECK_IF_ALREADY_INITIALIZED();
 			uade_raw_dec->filter_type = g_value_get_enum(value);
+			GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(object);
 			break;
+
 		case PROP_HEADPHONE_MODE:
+			GST_NONSTREAM_AUDIO_DECODER_LOCK_MUTEX(object);
 			CHECK_IF_ALREADY_INITIALIZED();
 			uade_raw_dec->headphone_mode = g_value_get_enum(value);
+			GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(object);
 			break;
+
 		case PROP_USE_FILTER:
+			GST_NONSTREAM_AUDIO_DECODER_LOCK_MUTEX(object);
 			uade_raw_dec->use_filter = g_value_get_boolean(value);
 			if (uade_raw_dec->state != NULL)
 				uade_set_filter_state(uade_raw_dec->state, uade_raw_dec->use_filter);
+			GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(object);
 			break;
+
 		case PROP_GAIN:
+			GST_NONSTREAM_AUDIO_DECODER_LOCK_MUTEX(object);
 			uade_raw_dec->gain = g_value_get_double(value);
 			UPDATE_EXISTING_NUM_CONFIG(UC_GAIN, uade_raw_dec->panning);
+			GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(object);
 			break;
+
 		case PROP_USE_POSTPROCESSING:
+			GST_NONSTREAM_AUDIO_DECODER_LOCK_MUTEX(object);
 			uade_raw_dec->use_postprocessing = g_value_get_boolean(value);
 			if (uade_raw_dec->state != NULL)
 				uade_effect_enable(uade_raw_dec->state, UADE_EFFECT_ALLOW);
+			GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(object);
 			break;
+
 		case PROP_PANNING:
+			GST_NONSTREAM_AUDIO_DECODER_LOCK_MUTEX(object);
 			uade_raw_dec->panning = g_value_get_double(value);
 			UPDATE_EXISTING_NUM_CONFIG(UC_PANNING_VALUE, uade_raw_dec->panning);
+			GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(object);
 			break;
+
 		default:
 			G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
 			break;
@@ -352,32 +381,59 @@ static void gst_uade_raw_dec_get_property(GObject *object, guint prop_id, GValue
 	switch (prop_id)
 	{
 		case PROP_LOCATION:
+			GST_NONSTREAM_AUDIO_DECODER_LOCK_MUTEX(object);
 			g_value_set_string(value, uade_raw_dec->location);
+			GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(object);
 			break;
+
 		case PROP_UADECORE_FILE:
+			GST_NONSTREAM_AUDIO_DECODER_LOCK_MUTEX(object);
 			g_value_set_string(value, uade_raw_dec->uadecore_file);
+			GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(object);
 			break;
+
 		case PROP_BASE_DIRECTORY:
+			GST_NONSTREAM_AUDIO_DECODER_LOCK_MUTEX(object);
 			g_value_set_string(value, uade_raw_dec->base_directory);
+			GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(object);
 			break;
+
 		case PROP_FILTER_TYPE:
+			GST_NONSTREAM_AUDIO_DECODER_LOCK_MUTEX(object);
 			g_value_set_enum(value, uade_raw_dec->filter_type);
+			GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(object);
 			break;
+
 		case PROP_HEADPHONE_MODE:
+			GST_NONSTREAM_AUDIO_DECODER_LOCK_MUTEX(object);
 			g_value_set_enum(value, uade_raw_dec->headphone_mode);
+			GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(object);
 			break;
+
 		case PROP_USE_FILTER:
+			GST_NONSTREAM_AUDIO_DECODER_LOCK_MUTEX(object);
 			g_value_set_boolean(value, uade_raw_dec->use_filter);
+			GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(object);
 			break;
+
 		case PROP_GAIN:
+			GST_NONSTREAM_AUDIO_DECODER_LOCK_MUTEX(object);
 			g_value_set_double(value, uade_raw_dec->gain);
+			GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(object);
 			break;
+
 		case PROP_USE_POSTPROCESSING:
+			GST_NONSTREAM_AUDIO_DECODER_LOCK_MUTEX(object);
 			g_value_set_boolean(value, uade_raw_dec->use_postprocessing);
+			GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(object);
 			break;
+
 		case PROP_PANNING:
+			GST_NONSTREAM_AUDIO_DECODER_LOCK_MUTEX(object);
 			g_value_set_double(value, uade_raw_dec->panning);
+			GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(object);
 			break;
+
 		default:
 			G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
 			break;
@@ -385,7 +441,7 @@ static void gst_uade_raw_dec_get_property(GObject *object, guint prop_id, GValue
 }
 
 
-static gboolean gst_uade_raw_dec_load_from_custom(GstNonstreamAudioDecoder *dec, guint initial_subsong, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode)
+static gboolean gst_uade_raw_dec_load_from_custom(GstNonstreamAudioDecoder *dec, guint initial_subsong, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode, gint *initial_num_loops)
 {
 	GstUadeRawDec *uade_raw_dec;
 	int ret;
@@ -448,7 +504,7 @@ static gboolean gst_uade_raw_dec_load_from_custom(GstNonstreamAudioDecoder *dec,
 
 
 	/* Set output format */
-	gst_nonstream_audio_decoder_set_output_audioinfo_simple(
+	gst_nonstream_audio_decoder_set_output_format_simple(
 		GST_NONSTREAM_AUDIO_DECODER(uade_raw_dec),
 		uade_get_sampling_rate(uade_raw_dec->state),
 		GST_AUDIO_FORMAT_S16,

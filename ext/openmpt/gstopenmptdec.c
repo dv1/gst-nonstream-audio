@@ -70,11 +70,11 @@ static void gst_openmpt_dec_finalize(GObject *object);
 static void gst_openmpt_dec_set_property(GObject *object, guint prop_id, const GValue *value, GParamSpec *pspec);
 static void gst_openmpt_dec_get_property(GObject *object, guint prop_id, GValue *value, GParamSpec *pspec);
 
-static gboolean gst_openmpt_dec_seek(GstNonstreamAudioDecoder *dec, GstClockTime new_position);
+static gboolean gst_openmpt_dec_seek(GstNonstreamAudioDecoder *dec, GstClockTime *new_position);
 static GstClockTime gst_openmpt_dec_tell(GstNonstreamAudioDecoder *dec);
 
 static void gst_openmpt_dec_log_func(char const *message, void *user);
-static gboolean gst_openmpt_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, GstBuffer *source_data, guint initial_subsong, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode);
+static gboolean gst_openmpt_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, GstBuffer *source_data, guint initial_subsong, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode, gint *initial_num_loops);
 
 static gboolean gst_openmpt_dec_set_current_subsong(GstNonstreamAudioDecoder *dec, guint subsong, GstClockTime *initial_position);
 static guint gst_openmpt_dec_get_current_subsong(GstNonstreamAudioDecoder *dec);
@@ -231,40 +231,44 @@ static void gst_openmpt_dec_set_property(GObject *object, guint prop_id, const G
 	{
 		case PROP_MASTER_GAIN:
 		{
-			GST_NONSTREAM_AUDIO_DECODER_STREAM_LOCK(dec);
+			GST_NONSTREAM_AUDIO_DECODER_LOCK_MUTEX(dec);
 			openmpt_dec->master_gain = g_value_get_int(value);
 			if (openmpt_dec->mod != NULL)
 				openmpt_module_set_render_param(openmpt_dec->mod, OPENMPT_MODULE_RENDER_MASTERGAIN_MILLIBEL, openmpt_dec->master_gain);
-			GST_NONSTREAM_AUDIO_DECODER_STREAM_UNLOCK(dec);
+			GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(dec);
 			break;
 		}
+
 		case PROP_STEREO_SEPARATION:
 		{
-			GST_NONSTREAM_AUDIO_DECODER_STREAM_LOCK(dec);
+			GST_NONSTREAM_AUDIO_DECODER_LOCK_MUTEX(dec);
 			openmpt_dec->stereo_separation = g_value_get_int(value);
 			if (openmpt_dec->mod != NULL)
 				openmpt_module_set_render_param(openmpt_dec->mod, OPENMPT_MODULE_RENDER_STEREOSEPARATION_PERCENT, openmpt_dec->stereo_separation);
-			GST_NONSTREAM_AUDIO_DECODER_STREAM_UNLOCK(dec);
+			GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(dec);
 			break;
 		}
+
 		case PROP_FILTER_LENGTH:
 		{
-			GST_NONSTREAM_AUDIO_DECODER_STREAM_LOCK(dec);
+			GST_NONSTREAM_AUDIO_DECODER_LOCK_MUTEX(dec);
 			openmpt_dec->filter_length = g_value_get_int(value);
 			if (openmpt_dec->mod != NULL)
 				openmpt_module_set_render_param(openmpt_dec->mod, OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH, openmpt_dec->filter_length);
-			GST_NONSTREAM_AUDIO_DECODER_STREAM_UNLOCK(dec);
+			GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(dec);
 			break;
 		}
+
 		case PROP_VOLUME_RAMPING:
 		{
-			GST_NONSTREAM_AUDIO_DECODER_STREAM_LOCK(dec);
+			GST_NONSTREAM_AUDIO_DECODER_LOCK_MUTEX(dec);
 			openmpt_dec->volume_ramping = g_value_get_int(value);
 			if (openmpt_dec->mod != NULL)
 				openmpt_module_set_render_param(openmpt_dec->mod, OPENMPT_MODULE_RENDER_VOLUMERAMPING_STRENGTH, openmpt_dec->volume_ramping);
-			GST_NONSTREAM_AUDIO_DECODER_STREAM_UNLOCK(dec);
+			GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(dec);
 			break;
 		}
+
 		default:
 			G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
 			break;
@@ -280,24 +284,36 @@ static void gst_openmpt_dec_get_property(GObject *object, guint prop_id, GValue 
 	{
 		case PROP_MASTER_GAIN:
 		{
+			GST_NONSTREAM_AUDIO_DECODER_LOCK_MUTEX(object);
 			g_value_set_int(value, openmpt_dec->master_gain);
+			GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(object);
 			break;
 		}
+
 		case PROP_STEREO_SEPARATION:
 		{
+			GST_NONSTREAM_AUDIO_DECODER_LOCK_MUTEX(object);
 			g_value_set_int(value, openmpt_dec->stereo_separation);
+			GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(object);
 			break;
 		}
+
 		case PROP_FILTER_LENGTH:
 		{
+			GST_NONSTREAM_AUDIO_DECODER_LOCK_MUTEX(object);
 			g_value_set_int(value, openmpt_dec->filter_length);
+			GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(object);
 			break;
 		}
+
 		case PROP_VOLUME_RAMPING:
 		{
+			GST_NONSTREAM_AUDIO_DECODER_LOCK_MUTEX(object);
 			g_value_set_int(value, openmpt_dec->volume_ramping);
+			GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(object);
 			break;
 		}
+
 		default:
 			G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
 			break;
@@ -305,12 +321,13 @@ static void gst_openmpt_dec_get_property(GObject *object, guint prop_id, GValue 
 }
 
 
-static gboolean gst_openmpt_dec_seek(GstNonstreamAudioDecoder *dec, GstClockTime new_position)
+static gboolean gst_openmpt_dec_seek(GstNonstreamAudioDecoder *dec, GstClockTime *new_position)
 {
 	GstOpenMptDec *openmpt_dec = GST_OPENMPT_DEC(dec);
 	g_return_val_if_fail(openmpt_dec->mod != NULL, FALSE);
 
-	openmpt_module_set_position_seconds(openmpt_dec->mod, (double)(new_position) / GST_SECOND);
+	openmpt_module_set_position_seconds(openmpt_dec->mod, (double)(*new_position) / GST_SECOND);
+	*new_position = gst_openmpt_dec_tell(dec);
 
 	return TRUE;
 }
@@ -331,7 +348,7 @@ static void gst_openmpt_dec_log_func(char const *message, void *user)
 }
 
 
-static gboolean gst_openmpt_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, GstBuffer *source_data, guint initial_subsong, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode)
+static gboolean gst_openmpt_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, GstBuffer *source_data, guint initial_subsong, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode, gint *initial_num_loops)
 {
 	GstMapInfo map;
 	GstOpenMptDec *openmpt_dec;
@@ -344,7 +361,7 @@ static gboolean gst_openmpt_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, 
 	gst_nonstream_audio_decoder_get_downstream_info(dec, &(openmpt_dec->sample_format), &(openmpt_dec->sample_rate), &(openmpt_dec->num_channels));
 
 	/* Set output format */
-	if (!gst_nonstream_audio_decoder_set_output_audioinfo_simple(
+	if (!gst_nonstream_audio_decoder_set_output_format_simple(
 		dec,
 		openmpt_dec->sample_rate,
 		openmpt_dec->sample_format,

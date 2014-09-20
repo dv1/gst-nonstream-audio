@@ -1,6 +1,6 @@
 /*
  *   GStreamer base class for non-streaming audio decoders
- *   Copyright (C) 2013 Carlos Rafael Giani
+ *   Copyright (C) 2013-2014 Carlos Rafael Giani
  *
  *   This library is free software; you can redistribute it and/or
  *   modify it under the terms of the GNU Lesser General Public
@@ -18,8 +18,8 @@
  */
 
 
-#ifndef GSTNONSTREAMAUDIODEC_H
-#define GSTNONSTREAMAUDIODEC_H
+#ifndef GSTNONSTREAMAUDIODECODER_H
+#define GSTNONSTREAMAUDIODECODER_H
 
 #include <gst/gst.h>
 #include <gst/base/gstadapter.h>
@@ -37,18 +37,15 @@ typedef struct _GstNonstreamAudioDecoderClass GstNonstreamAudioDecoderClass;
  * GstNonstreamAudioOutputMode:
  * @GST_NONSTREM_AUDIO_OUTPUT_MODE_LOOPING: Playback position is moved back to the beginning of the loop
  * @GST_NONSTREM_AUDIO_OUTPUT_MODE_STEADY: Playback position increases steadily, even when looping
- * @GST_NONSTREM_AUDIO_OUTPUT_MODE_UNDEFINED: Behavior upon looping is undefined
  *
  * The output mode defines how the output behaves with regards to looping. Either the playback position is
  * moved back to the beginning of the loop, acting like a backwards seek, or it increases steadily, as if
- * loop were "unrolled". GST_NONSTREM_AUDIO_OUTPUT_MODE_UNDEFINED is valid only as an initial internal
- * output mode state; from the outside, only LOOPING and STEADY can be set.
+ * loop were "unrolled".
  */
 typedef enum
 {
-	GST_NONSTREM_AUDIO_OUTPUT_MODE_LOOPING = 0,
-	GST_NONSTREM_AUDIO_OUTPUT_MODE_STEADY = 1,
-	GST_NONSTREM_AUDIO_OUTPUT_MODE_UNDEFINED
+	GST_NONSTREM_AUDIO_OUTPUT_MODE_LOOPING,
+	GST_NONSTREM_AUDIO_OUTPUT_MODE_STEADY
 } GstNonstreamAudioOutputMode;
 
 
@@ -89,8 +86,26 @@ typedef enum
 
 #define GST_NONSTREAM_AUDIO_DECODER_SRC_PAD(obj)         (((GstNonstreamAudioDecoder *) (obj))->srcpad)
 
-#define GST_NONSTREAM_AUDIO_DECODER_STREAM_LOCK(dec)   g_rec_mutex_lock(&(GST_NONSTREAM_AUDIO_DECODER(dec)->stream_lock))
-#define GST_NONSTREAM_AUDIO_DECODER_STREAM_UNLOCK(dec) g_rec_mutex_unlock(&(GST_NONSTREAM_AUDIO_DECODER(dec)->stream_lock))
+
+/**
+ * GST_NONSTREAM_AUDIO_DECODER_LOCK_MUTEX:
+ * @obj: base nonstream audio codec instance
+ *
+ * Locks the decoder mutex.
+ *
+ * Internally, the mutex is locked before one of the class vfuncs are
+ * called, when position and duration queries are handled, and when
+ * properties are set/retrieved.
+ *
+ * Derived classes should call lock during decoder related modifications
+ * (for example, setting/clearing filter banks), when at the same time
+ * audio might get decoded. An example are configuration changes that
+ * happen when properties are set. Properties might be set from another
+ * thread, so while the derived decoder is reconfigured, the mutex
+ * should be locked.
+ */
+#define GST_NONSTREAM_AUDIO_DECODER_LOCK_MUTEX(obj)      g_mutex_lock(&(((GstNonstreamAudioDecoder *)(obj))->mutex))
+#define GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(obj)    g_mutex_unlock(&(((GstNonstreamAudioDecoder *)(obj))->mutex))
 
 
 /**
@@ -107,56 +122,40 @@ struct _GstNonstreamAudioDecoder
 	/* source and sink pads */
 	GstPad *sinkpad, *srcpad;
 
-	/* duration of the current subsong */
-	GstClockTime duration;
+	/* loading information */
+	gint64 upstream_size;
+	gboolean loaded_mode;
+	GstAdapter *input_data_adapter;
 
-	/* offset (in samples) and number of decoded samples
-	 * The difference between these two values is: offset is used for the
-	 * GstBuffer offsets, while num_decoded is used for the segment base
-	 * time values.
-	 * offset is reset after seeking, looping (when output mode is LOOPING)
-	 * and switching subsongs, while num_decoded is only reset to 0 after
-	 * seeking (because seeking alters the pipeline's base_time).
-	 */
-	guint64 offset, num_decoded;
-	/* currently playing segment */
-	GstSegment cur_segment;
+	/* subsong states */
+	guint current_subsong;
+	GstClockTime subsong_duration;
 
-	/* the subsong initially set
-	 * This value is ignored after the media has been loaded. Before,
-	 * it is set by the _init() and the set_property() functions. It is
-	 * mainly used to cover the case when the current-subsong property is
-	 * defined right from the start, and the media isn't loaded yet.
-	 */
-	guint initial_subsong;
-	/* table of contents
-	 * A simple table of contents, each subsong being represented by an
-	 * entry. If there are <=1 subsongs , no table is used, and toc is NULL.
-	 */
-	GstToc *toc;
-
-	gboolean loaded;
-
+	/* output states */
 	GstNonstreamAudioOutputMode output_mode;
-
-	/* output audio information, set by set_output_audioinfo() */
-	GstAudioInfo audio_info;
+	gint num_loops;
 	gboolean output_format_changed;
-
-	/* if this is true, the next buffer will have its DISCONT flag enabled,
-	 * and discont is set to FALSE afterwards again */
+	GstAudioInfo output_audio_info;
+	/* The difference between these two values is: cur_pos_in_samples is
+	 * used for the GstBuffer offsets, while num_decoded_samples is used
+	 * for the segment base time values.
+	 * cur_pos_in_samples is reset after seeking, looping (when output mode
+	 * is LOOPING) and switching subsongs, while num_decoded is only reset
+	 * to 0 after a flushing seek (because flushing seeks alter the
+	 * pipeline's base_time). */
+	guint64 cur_pos_in_samples, num_decoded_samples;
+	GstSegment cur_segment;
 	gboolean discont;
 
+	/* metadata */
+	GstToc *toc;
+
+	/* allocation */
 	GstAllocator *allocator;
 	GstAllocationParams allocation_params;
 
-	/* these two values are used in push mode only, for loading */
-	GstAdapter *adapter;
-	gint64 upstream_size;
-
-	gboolean sinkpad_in_pull_mode;
-
-	GRecMutex stream_lock;
+	/* thread safety */
+	GMutex mutex;
 };
 
 
@@ -165,8 +164,12 @@ struct _GstNonstreamAudioDecoder
  * @element_class:              The parent class structure
  * @seek:                       Optional.
  *                              Called when a seek event is received by the parent class.
- *                              The position is given relative to the current subsong.
+ *                              new_position is a pointer to a GstClockTime integer which
+ *                              contains a position relative to the current subsong.
  *                              Minimum is 0, maximum is the subsong length.
+ *                              After this function finishes, new_position is set to the
+ *                              actual new position (which may differ from the request
+ *                              position, depending on the decoder).
  * @tell:                       Optional.
  *                              Called when a position query is received by the parent class.
  *                              The position that this function returns must be relative to
@@ -249,8 +252,7 @@ struct _GstNonstreamAudioDecoder
  * needed. At minimum, @load_from_buffer (or @load_from_custom), @get_supported_output_modes,
  * and @decode need to be overridden.
  *
- * These functions (with the exception of @load_from_buffer and @load_from_custom) only need
- * to be functional after the media was loaded, since the base class will not call them before.
+ * All functions are called with a locked decoder mutex.
  *
  * By default, this class works by reading media data from the sinkpad, and then commencing
  * playback. Some decoders cannot be given data from a memory block, so the usual way of
@@ -271,23 +273,23 @@ struct _GstNonstreamAudioDecoderClass
 	/*< public >*/
 	/* virtual methods for subclasses */
 
-	gboolean (*seek)(GstNonstreamAudioDecoder *dec, GstClockTime new_position);
+	gboolean     (*seek)(GstNonstreamAudioDecoder *dec, GstClockTime *new_position);
 	GstClockTime (*tell)(GstNonstreamAudioDecoder *dec);
 
-	gboolean (*load_from_buffer)(GstNonstreamAudioDecoder *dec, GstBuffer *source_data, guint initial_subsong, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode);
-	gboolean (*load_from_custom)(GstNonstreamAudioDecoder *dec, guint initial_subsong, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode);
+	gboolean (*load_from_buffer)(GstNonstreamAudioDecoder *dec, GstBuffer *source_data, guint initial_subsong, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode, gint *initial_num_loops);
+	gboolean (*load_from_custom)(GstNonstreamAudioDecoder *dec, guint initial_subsong, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode, gint *initial_num_loops);
 
 	gboolean (*set_current_subsong)(GstNonstreamAudioDecoder *dec, guint subsong, GstClockTime *initial_position);
-	guint (*get_current_subsong)(GstNonstreamAudioDecoder *dec);
+	guint    (*get_current_subsong)(GstNonstreamAudioDecoder *dec);
 
-	guint (*get_num_subsongs)(GstNonstreamAudioDecoder *dec);
+	guint        (*get_num_subsongs)(GstNonstreamAudioDecoder *dec);
 	GstClockTime (*get_subsong_duration)(GstNonstreamAudioDecoder *dec, guint subsong);
-	GstTagList* (*get_subsong_tags)(GstNonstreamAudioDecoder *dec, guint subsong);
+	GstTagList*  (*get_subsong_tags)(GstNonstreamAudioDecoder *dec, guint subsong);
 
 	gboolean (*set_num_loops)(GstNonstreamAudioDecoder *dec, gint num_loops);
-	gint (*get_num_loops)(GstNonstreamAudioDecoder *dec);
+	gint     (*get_num_loops)(GstNonstreamAudioDecoder *dec);
 
-	guint (*get_supported_output_modes)(GstNonstreamAudioDecoder *dec);
+	guint    (*get_supported_output_modes)(GstNonstreamAudioDecoder *dec);
 	gboolean (*set_output_mode)(GstNonstreamAudioDecoder *dec, GstNonstreamAudioOutputMode mode, GstClockTime *current_position);
 
 	gboolean (*decode)(GstNonstreamAudioDecoder *dec, GstBuffer **buffer, guint *num_samples);
@@ -302,18 +304,90 @@ struct _GstNonstreamAudioDecoderClass
 GType gst_nonstream_audio_decoder_get_type(void);
 
 
+/**
+ * Reports a loop and creates a new appropriate segment.
+ *
+ * The derived class calls this during playback when it loops. It produces
+ * a new segment with updated base time and internal time values, to allow
+ * for seamless looping. It does *not* check the number of elapsed loops;
+ * this is up the derive class. Also, if the current output mode is
+ * GST_NONSTREM_AUDIO_OUTPUT_MODE_STEADY, this function does nothing.
+ *
+ * @param dec Decoder instance
+ * @param new_position New position the next loop starts with
+ *        (sometimes, a loop does not start at the beginning) */
 void gst_nonstream_audio_decoder_handle_loop(GstNonstreamAudioDecoder *dec, GstClockTime new_position);
 
-gboolean gst_nonstream_audio_decoder_set_output_audioinfo(GstNonstreamAudioDecoder *dec, GstAudioInfo const *info);
-gboolean gst_nonstream_audio_decoder_set_output_audioinfo_simple(GstNonstreamAudioDecoder *dec, guint sample_rate, GstAudioFormat sample_format, guint num_channels);
-gboolean gst_nonstream_audio_decoder_negotiate(GstNonstreamAudioDecoder *dec);
+/**
+ * Sets the output caps by means of a GstAudioInfo structure.
+ *
+ * This must be called latest before @decode finishes, to ensure src caps are
+ * set before decoded samples are sent downstream. Typically, this is called
+ * from inside @load_from_buffer or @load_from_custom.
+ *
+ * @param dec Decoder instance
+ * @param audio_info Valid audio info structure containing the output format
+ * @return TRUE if setting the output format succeeded, FALSE otherwise
+ */
+gboolean gst_nonstream_audio_decoder_set_output_format(GstNonstreamAudioDecoder *dec, GstAudioInfo const *audio_info);
+
+
+/**
+ * Convenience function; sets the output caps by means of common parameters.
+ *
+ * Internally, this fills a GstAudioInfo structure and calls
+ * @gst_nonstream_audio_decoder_set_output_format.
+ *
+ * @param dec Decoder instance
+ * @param sample_rate Output sample rate to use, in Hz
+ * @param sample_format Output sample format to use
+ * @param num_channels Number of output channels to use
+ * @return TRUE if setting the output format succeeded, FALSE otherwise
+ */
+gboolean gst_nonstream_audio_decoder_set_output_format_simple(GstNonstreamAudioDecoder *dec, guint sample_rate, GstAudioFormat sample_format, guint num_channels);
+
+
+/**
+ * Utility function. Gets the srcpad's peer pad for its caps.
+ *
+ * This is useful for when the decoder wishes to adjust one or more output
+ * paramters to whatever downstream is supporting. For example, the output
+ * sample rate is often a freely adjustable value in module players.
+ *
+ * For each non-NULL parameter, this function tries to find a value inside
+ * the srcpad peer's caps. If these caps are unnormalized, they are first
+ * normalized; if for example the number of channels is a set like { 2, 1 },
+ * due to the normalized caps, this function will set *num_channels to 2.
+ * Ranges however are not normalized; if a value is a range, its
+ * corresponding parameter is not set. This is often the case for the sample
+ * rate.
+ *
+ * If any of the non-NULL parameters is not set, any value the parameter
+ * might already have is left unchanged. This is useful to use default values.
+ * For example, a decoder might use a default sample rate of 48000 Hz. If then
+ * it calls this function, it passes to sample_rate an integer which is set
+ * to 48000, and the peer pad's sample rate caps is a range like [ 1, 96000 ],
+ * then the value of that integer remains 48000.
+ *
+ * @param dec Decoder instance
+ * @param format GstAudioFormat value to fill with a sample format
+ * @param sample_rate Integer to fill with a sample rate
+ * @param num_channels Integer to fill with a channel count
+ */
 void gst_nonstream_audio_decoder_get_downstream_info(GstNonstreamAudioDecoder *dec, GstAudioFormat *format, gint *sample_rate, gint *num_channels);
 
-GstBuffer * gst_nonstream_audio_decoder_allocate_output_buffer(GstNonstreamAudioDecoder *dec, gsize size);
+
+/**
+ * Allocates an output buffer with the internally configured buffer pool.
+ *
+ * @param dec Decoder instance
+ * @param size Size of the output buffer, in bytes
+ * @return Newly allocated output buffer, or NULL if allocation failed
+ */
+GstBuffer* gst_nonstream_audio_decoder_allocate_output_buffer(GstNonstreamAudioDecoder *dec, gsize size);
 
 
 G_END_DECLS
 
 
 #endif
-

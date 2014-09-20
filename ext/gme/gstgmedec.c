@@ -71,13 +71,13 @@ static void gst_gme_dec_finalize(GObject *object);
 static void gst_gme_dec_set_property(GObject *object, guint prop_id, const GValue *value, GParamSpec *pspec);
 static void gst_gme_dec_get_property(GObject *object, guint prop_id, GValue *value, GParamSpec *pspec);
 
-static gboolean gst_gme_dec_seek(GstNonstreamAudioDecoder *dec, GstClockTime new_position);
+static gboolean gst_gme_dec_seek(GstNonstreamAudioDecoder *dec, GstClockTime *new_position);
 static GstClockTime gst_gme_dec_tell(GstNonstreamAudioDecoder *dec);
 
 static GstTagList* gst_gme_dec_tags_from_track_info(GstGmeDec *gme_dec, guint track_nr);
 static GstClockTime gst_gme_dec_duration_from_track_info(GstGmeDec *gme_dec, guint track_nr);
 
-static gboolean gst_gme_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, GstBuffer *source_data, guint initial_subsong, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode);
+static gboolean gst_gme_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, GstBuffer *source_data, guint initial_subsong, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode, gint *initial_num_loops);
 
 static void gst_gme_dec_update_effects(GstGmeDec *gme_dec);
 
@@ -233,7 +233,7 @@ static void gst_gme_dec_set_property(GObject *object, guint prop_id, const GValu
 		case PROP_ENABLE_EFFECTS:
 		case PROP_ENABLE_SURROUND:
 		{
-			GST_NONSTREAM_AUDIO_DECODER_STREAM_LOCK(dec);
+			GST_NONSTREAM_AUDIO_DECODER_LOCK_MUTEX(dec);
 
 			switch (prop_id)
 			{
@@ -255,7 +255,7 @@ static void gst_gme_dec_set_property(GObject *object, guint prop_id, const GValu
 
 			gst_gme_dec_update_effects(gme_dec);
 
-			GST_NONSTREAM_AUDIO_DECODER_STREAM_UNLOCK(dec);
+			GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(dec);
 		}
 		default:
 			G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
@@ -275,6 +275,8 @@ static void gst_gme_dec_get_property(GObject *object, guint prop_id, GValue *val
 		case PROP_ENABLE_EFFECTS:
 		case PROP_ENABLE_SURROUND:
 		{
+			GST_NONSTREAM_AUDIO_DECODER_LOCK_MUTEX(object);
+
 			switch (prop_id)
 			{
 				case PROP_ECHO:
@@ -293,6 +295,8 @@ static void gst_gme_dec_get_property(GObject *object, guint prop_id, GValue *val
 					break;
 			}
 
+			GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(object);
+
 			break;
 		}
 		default:
@@ -302,20 +306,24 @@ static void gst_gme_dec_get_property(GObject *object, guint prop_id, GValue *val
 }
 
 
-static gboolean gst_gme_dec_seek(GstNonstreamAudioDecoder *dec, GstClockTime new_position)
+static gboolean gst_gme_dec_seek(GstNonstreamAudioDecoder *dec, GstClockTime *new_position)
 {
 	gme_err_t err;
 	GstGmeDec *gme_dec = GST_GME_DEC(dec);
 	g_return_val_if_fail(gme_dec->emu != NULL, FALSE);
 
-	err = gme_seek(gme_dec->emu, new_position / GST_MSECOND);
+	err = gme_seek(gme_dec->emu, *new_position / GST_MSECOND);
 	if (G_UNLIKELY(err != NULL))
 	{
 		GST_ERROR_OBJECT(dec, "error while seeking: %s", err);
 		return FALSE;
 	}
 	else
+	{
+		*new_position = gst_gme_dec_tell(dec);
+		GST_DEBUG_OBJECT(dec, "position after seeking: %" GST_TIME_FORMAT, GST_TIME_ARGS(*new_position));
 		return TRUE;
+	}
 }
 
 
@@ -399,7 +407,7 @@ static GstClockTime gst_gme_dec_duration_from_track_info(GstGmeDec *gme_dec, gui
 }
 
 
-static gboolean gst_gme_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, GstBuffer *source_data, guint initial_subsong, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode)
+static gboolean gst_gme_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, GstBuffer *source_data, guint initial_subsong, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode, gint *initial_num_loops)
 {
 	GstMapInfo map;
 	gme_err_t err;
@@ -412,7 +420,7 @@ static gboolean gst_gme_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, GstB
 	gst_nonstream_audio_decoder_get_downstream_info(dec, NULL, &sample_rate, NULL);
 
 	/* Set output format */
-	if (!gst_nonstream_audio_decoder_set_output_audioinfo_simple(
+	if (!gst_nonstream_audio_decoder_set_output_format_simple(
 		dec,
 		sample_rate,
 		GST_AUDIO_FORMAT_S16,

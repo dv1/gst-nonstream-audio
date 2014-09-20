@@ -86,11 +86,11 @@ static void gst_dumb_dec_finalize(GObject *object);
 static void gst_dumb_dec_set_property(GObject *object, guint prop_id, const GValue *value, GParamSpec *pspec);
 static void gst_dumb_dec_get_property(GObject *object, guint prop_id, GValue *value, GParamSpec *pspec);
 
-static gboolean gst_dumb_dec_seek(GstNonstreamAudioDecoder *dec, GstClockTime new_position);
+static gboolean gst_dumb_dec_seek(GstNonstreamAudioDecoder *dec, GstClockTime *new_position);
 static GstClockTime gst_dumb_dec_tell(GstNonstreamAudioDecoder *dec);
 
 static guint gst_dumb_dec_check_initial_subsong_index(GstDumbDec *dumb_dec, guint initial_subsong);
-static gboolean gst_dumb_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, GstBuffer *source_data, guint initial_subsong, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode);
+static gboolean gst_dumb_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, GstBuffer *source_data, guint initial_subsong, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode, gint *initial_num_loops);
 
 static gboolean gst_dumb_dec_set_current_subsong(GstNonstreamAudioDecoder *dec, guint subsong, GstClockTime *initial_position);
 static guint gst_dumb_dec_get_current_subsong(GstNonstreamAudioDecoder *dec);
@@ -127,9 +127,6 @@ void gst_dumb_dec_class_init(GstDumbDecClass *klass)
 	element_class = GST_ELEMENT_CLASS(klass);
 	dec_class = GST_NONSTREAM_AUDIO_DECODER_CLASS(klass);
 
-	gst_element_class_add_pad_template(element_class, gst_static_pad_template_get(&sink_template));
-	gst_element_class_add_pad_template(element_class, gst_static_pad_template_get(&src_template));
-
 	object_class->finalize = GST_DEBUG_FUNCPTR(gst_dumb_dec_finalize);
 	object_class->set_property = GST_DEBUG_FUNCPTR(gst_dumb_dec_set_property);
 	object_class->get_property = GST_DEBUG_FUNCPTR(gst_dumb_dec_get_property);
@@ -147,6 +144,17 @@ void gst_dumb_dec_class_init(GstDumbDecClass *klass)
 	dec_class->get_num_subsongs = GST_DEBUG_FUNCPTR(gst_dumb_dec_get_num_subsongs);
 	dec_class->get_subsong_duration = GST_DEBUG_FUNCPTR(gst_dumb_dec_get_subsong_duration);
 	dec_class->get_subsong_tags = GST_DEBUG_FUNCPTR(gst_dumb_dec_get_subsong_tags);
+
+	gst_element_class_add_pad_template(element_class, gst_static_pad_template_get(&sink_template));
+	gst_element_class_add_pad_template(element_class, gst_static_pad_template_get(&src_template));
+
+	gst_element_class_set_static_metadata(
+		element_class,
+		"DUMB module player",
+		"Codec/Decoder/Audio",
+		"Plays module files (MOD/S3M/XM/IT/MTM/...) using the DUMB (Dynamic Universal Music Bibliotheque) library",
+		"Carlos Rafael Giani <dv@pseudoterminal.org>"
+	);
 
 	g_object_class_install_property(
 		object_class,
@@ -171,14 +179,6 @@ void gst_dumb_dec_class_init(GstDumbDecClass *klass)
 			DEFAULT_RAMP_STYLE,
 			G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS
 		)
-	);
-
-	gst_element_class_set_static_metadata(
-		element_class,
-		"DUMB module player",
-		"Codec/Decoder/Audio",
-		"Plays module files (MOD/S3M/XM/IT/MTM/...) using the DUMB (Dynamic Universal Music Bibliotheque) library",
-		"Carlos Rafael Giani <dv@pseudoterminal.org>"
 	);
 }
 
@@ -289,14 +289,14 @@ static void gst_dumb_dec_set_property(GObject *object, guint prop_id, const GVal
 		{
 			DUMB_IT_SIGRENDERER *itsr;
 
-			GST_NONSTREAM_AUDIO_DECODER_STREAM_LOCK(dec);
+			GST_NONSTREAM_AUDIO_DECODER_LOCK_MUTEX(dec);
 			dumb_dec->resampling_quality = g_value_get_enum(value);
 			if (dumb_dec->duh_sigrenderer != NULL)
 			{
 				itsr = duh_get_it_sigrenderer(dumb_dec->duh_sigrenderer);
 				dumb_it_set_resampling_quality(itsr, dumb_dec->resampling_quality);
 			}
-			GST_NONSTREAM_AUDIO_DECODER_STREAM_UNLOCK(dec);
+			GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(dec);
 
 			break;
 		}
@@ -304,14 +304,14 @@ static void gst_dumb_dec_set_property(GObject *object, guint prop_id, const GVal
 		{
 			DUMB_IT_SIGRENDERER *itsr;
 
-			GST_NONSTREAM_AUDIO_DECODER_STREAM_LOCK(dec);
+			GST_NONSTREAM_AUDIO_DECODER_LOCK_MUTEX(dec);
 			dumb_dec->ramp_style = g_value_get_enum(value);
 			if (dumb_dec->duh_sigrenderer != NULL)
 			{
 				itsr = duh_get_it_sigrenderer(dumb_dec->duh_sigrenderer);
 				dumb_it_set_ramp_style(itsr, dumb_dec->ramp_style);
 			}
-			GST_NONSTREAM_AUDIO_DECODER_STREAM_UNLOCK(dec);
+			GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(dec);
 
 			break;
 		}
@@ -329,11 +329,17 @@ static void gst_dumb_dec_get_property(GObject *object, guint prop_id, GValue *va
 	switch (prop_id)
 	{
 		case PROP_RESAMPLING_QUALITY:
+			GST_NONSTREAM_AUDIO_DECODER_LOCK_MUTEX(object);
 			g_value_set_enum(value, dumb_dec->resampling_quality);
+			GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(object);
 			break;
+
 		case PROP_RAMP_STYLE:
+			GST_NONSTREAM_AUDIO_DECODER_LOCK_MUTEX(object);
 			g_value_set_enum(value, dumb_dec->ramp_style);
+			GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(object);
 			break;
+
 		default:
 			G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
 			break;
@@ -341,7 +347,7 @@ static void gst_dumb_dec_get_property(GObject *object, guint prop_id, GValue *va
 }
 
 
-static gboolean gst_dumb_dec_seek(GstNonstreamAudioDecoder *dec, GstClockTime new_position)
+static gboolean gst_dumb_dec_seek(GstNonstreamAudioDecoder *dec, GstClockTime *new_position)
 {
 	GstClockTime pos;
 	GstDumbDec *dumb_dec = GST_DUMB_DEC(dec);
@@ -352,12 +358,19 @@ static gboolean gst_dumb_dec_seek(GstNonstreamAudioDecoder *dec, GstClockTime ne
 		return FALSE;
 	}
 
-	pos = gst_util_uint64_scale_int(new_position, 65536, GST_SECOND) + dumb_dec->cur_subsong_start_pos;
+	dumb_dec->cur_loop_count = 0;
+	pos = gst_util_uint64_scale_int(*new_position, 65536, GST_SECOND) + dumb_dec->cur_subsong_start_pos;
 
 	if (!gst_dumb_dec_init_sigrenderer_at_pos(GST_DUMB_DEC(dec), pos))
 	{
 		GST_ELEMENT_ERROR(dec, STREAM, DECODE, (NULL), ("cannot reinitialize DUMB decoding"));
 		return FALSE;
+	}
+	else
+	{
+		*new_position = gst_dumb_dec_tell(dec);
+		GST_DEBUG_OBJECT(dec, "position after seeking: %" GST_TIME_FORMAT, GST_TIME_ARGS(*new_position));
+		return TRUE;
 	}
 
 	return TRUE;
@@ -393,7 +406,7 @@ static guint gst_dumb_dec_check_initial_subsong_index(GstDumbDec *dumb_dec, guin
 }
 
 
-static gboolean gst_dumb_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, GstBuffer *source_data, guint initial_subsong, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode)
+static gboolean gst_dumb_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, GstBuffer *source_data, guint initial_subsong, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode, gint *initial_num_loops)
 {
 	gboolean ret;
 	GstDumbDec *dumb_dec = GST_DUMB_DEC(dec);
@@ -463,10 +476,9 @@ static gboolean gst_dumb_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, Gst
 
 	*initial_position = 0;
 
-	if (*initial_output_mode == GST_NONSTREM_AUDIO_OUTPUT_MODE_UNDEFINED)
-		*initial_output_mode = GST_NONSTREM_AUDIO_OUTPUT_MODE_LOOPING;
-
 	dumb_dec->do_actual_looping = ((*initial_output_mode) == GST_NONSTREM_AUDIO_OUTPUT_MODE_LOOPING);
+
+	gst_dumb_dec_set_num_loops(dec, *initial_num_loops);
 
 	/* In case there is no dedicated subsong information inside the song data, scan the song for these
 	   many modules contain isolated subsets that act as subsongs */
@@ -520,7 +532,7 @@ static gboolean gst_dumb_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, Gst
 	}
 
 	/* Set output format */
-	if (!gst_nonstream_audio_decoder_set_output_audioinfo_simple(
+	if (!gst_nonstream_audio_decoder_set_output_format_simple(
 		dec,
 		dumb_dec->sample_rate,
 		GST_AUDIO_FORMAT_S16,
@@ -702,7 +714,7 @@ static int gst_dumb_dec_loop_callback(void *ptr)
 	dumb_dec = (GstDumbDec*)(ptr);
 	dec = GST_NONSTREAM_AUDIO_DECODER(dumb_dec);
 
-	GST_DEBUG_OBJECT(dumb_dec, "DUMB reached loop callback");
+	GST_DEBUG_OBJECT(dumb_dec, "DUMB reached loop callback, cur_loop_count = %d, num_loops = %d", dumb_dec->cur_loop_count, dumb_dec->num_loops);
 
 	if (dumb_dec->num_loops < 0)
 		continue_loop = TRUE;
