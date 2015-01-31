@@ -73,7 +73,7 @@ def configure(conf):
 		check_compiler_flags_2(conf, conf.env['CFLAGS'], '', "Testing compiler flags %s" % ' '.join(conf.env['CFLAGS']))
 	elif conf.env['LINKFLAGS']:
 		check_compiler_flags_2(conf, '', conf.env['LINKFLAGS'], "Testing linker flags %s" % ' '.join(conf.env['LINKFLAGS']))
-	c_compiler_flags = ['-Wextra', '-Wall', '-std=c99', '-pedantic', '-fPIC', '-DPIC']
+	c_compiler_flags = ['-Wextra', '-Wall', '-std=gnu99', '-pedantic', '-fPIC', '-DPIC']
 	cxx_compiler_flags = ['-Wextra', '-Wall',  '-pedantic', '-fPIC', '-DPIC']
 	common_compiler_flags = []
 	if conf.options.enable_debug:
