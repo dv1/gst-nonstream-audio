@@ -256,6 +256,8 @@ static void gst_gme_dec_set_property(GObject *object, guint prop_id, const GValu
 			gst_gme_dec_update_effects(gme_dec);
 
 			GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(dec);
+
+			break;
 		}
 		default:
 			G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
