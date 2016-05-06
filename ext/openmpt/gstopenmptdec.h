@@ -3,7 +3,7 @@
 
 
 #include <gst/gst.h>
-#include "gstnonstreamaudiodecoder.h"
+#include "gst/audio/gstnonstreamaudiodecoder.h"
 #include <libopenmpt/libopenmpt.h>
 
 

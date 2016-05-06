@@ -141,7 +141,7 @@ def configure(conf):
 
 
 def build(bld):
-	nonstreamaudio_source = bld.srcnode.ant_glob('gst-libs/*.c')
+	nonstreamaudio_source = bld.srcnode.ant_glob('gst-libs/gst/audio/*.c')
 	bld(
 		features = ['c', 'cshlib'],
 		includes = ['.', 'gst-libs'],

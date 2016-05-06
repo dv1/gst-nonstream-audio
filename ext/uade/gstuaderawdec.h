@@ -2,7 +2,7 @@
 #define GSTUADERAWDEC_H
 
 #include <gst/gst.h>
-#include "gstnonstreamaudiodecoder.h"
+#include "gst/audio/gstnonstreamaudiodecoder.h"
 #include <linux/limits.h>
 #include <sys/types.h>
 #include <uade/uade.h>

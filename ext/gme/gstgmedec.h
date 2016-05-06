@@ -4,7 +4,7 @@
 
 #include <gst/gst.h>
 #include <gme/gme.h>
-#include "gstnonstreamaudiodecoder.h"
+#include "gst/audio/gstnonstreamaudiodecoder.h"
 
 
 G_BEGIN_DECLS
