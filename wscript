@@ -44,6 +44,7 @@ def options(opt):
 	opt.add_option('--enable-debug', action = 'store_true', default = False, help = 'enable debug build [default: %default]')
 	opt.add_option('--with-package-name', action = 'store', default = "gstnonstreamaudio plug-in source release", help = 'specify package name to use in plugin [default: %default]')
 	opt.add_option('--with-package-origin', action = 'store', default = "Unknown package origin", help = 'specify package origin URL to use in plugin [default: %default]')
+	opt.add_option('--lib-install-path', action = 'store', default = "${PREFIX}/lib", help = 'where to install the libraries [default: %default]')
 	opt.add_option('--plugin-install-path', action = 'store', default = "${PREFIX}/lib/gstreamer-1.0", help = 'where to install the plugin for GStreamer 1.0 [default: %default]')
 	opt.load('compiler_c')
 	opt.load('compiler_cxx')
@@ -110,6 +111,7 @@ def configure(conf):
 	conf.check_cfg(package = 'gstreamer-base-1.0 >= 1.0.0',  uselib_store = 'GSTREAMER_BASE',  args = '--cflags --libs', mandatory = 1)
 	conf.check_cfg(package = 'gstreamer-audio-1.0 >= 1.0.0', uselib_store = 'GSTREAMER_AUDIO', args = '--cflags --libs', mandatory = 1)
 	conf.env['PLUGIN_INSTALL_PATH'] = os.path.expanduser(conf.options.plugin_install_path)
+	conf.env['LIB_INSTALL_PATH'] = os.path.expanduser(conf.options.lib_install_path)
 	conf.define('GST_PACKAGE_NAME', conf.options.with_package_name)
 	conf.define('GST_PACKAGE_ORIGIN', conf.options.with_package_origin)
 	conf.define('PACKAGE', "gstnonstreamaudio")
@@ -148,7 +150,8 @@ def build(bld):
 		uselib = 'GSTREAMER GSTREAMER_BASE GSTREAMER_AUDIO',
 		target = 'gstnonstreamaudio',
 		name = 'gstnonstreamaudio',
-		source = nonstreamaudio_source
+		source = nonstreamaudio_source,
+		install_path = bld.env['LIB_INSTALL_PATH']
 	)
 
 	bld.recurse('gst/umxparse')
