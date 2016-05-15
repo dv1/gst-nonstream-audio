@@ -244,6 +244,8 @@ static void gst_nonstream_audio_decoder_update_subsong_duration(GstNonstreamAudi
 static void gst_nonstream_audio_decoder_output_new_segment(GstNonstreamAudioDecoder *dec, GstClockTime start_position);
 static gboolean gst_nonstream_audio_decoder_do_seek(GstNonstreamAudioDecoder *dec, GstEvent *event);
 
+static GstTagList * gst_nonstream_audio_decoder_add_main_tags(GstNonstreamAudioDecoder *dec, GstTagList *tags);
+
 static void gst_nonstream_audio_decoder_output_task(GstNonstreamAudioDecoder *dec);
 
 static char const * get_seek_type_name(GstSeekType seek_type);
@@ -338,6 +340,8 @@ static void gst_nonstream_audio_decoder_class_init(GstNonstreamAudioDecoderClass
 
 	klass->load_from_buffer = NULL;
 	klass->load_from_custom = NULL;
+
+	klass->get_main_tags = NULL;
 
 	klass->get_current_subsong = NULL;
 	klass->set_current_subsong = NULL;
@@ -558,9 +562,11 @@ static void gst_nonstream_audio_decoder_set_property(GObject *object, guint prop
 						/* use the new subsong's tags (if any exist) */
 						if (klass->get_subsong_tags != NULL)
 						{
-							GstTagList *tags = klass->get_subsong_tags(dec, new_subsong);
-							if (tags != NULL)
-								gst_pad_push_event(dec->srcpad, gst_event_new_tag(tags));
+							GstTagList *subsong_tags = klass->get_subsong_tags(dec, new_subsong);
+							if (subsong_tags != NULL)
+								subsong_tags = gst_nonstream_audio_decoder_add_main_tags(dec, subsong_tags);
+							if (subsong_tags != NULL)
+								gst_pad_push_event(dec->srcpad, gst_event_new_tag(subsong_tags));
 						}
 					}
 				}
@@ -1273,6 +1279,8 @@ static gboolean gst_nonstream_audio_decoder_finish_load(GstNonstreamAudioDecoder
 		GST_TRACE_OBJECT(dec, "requesting subsong tags");
 		tags = klass->get_subsong_tags(dec, dec->current_subsong);
 		if (tags != NULL)
+			tags = gst_nonstream_audio_decoder_add_main_tags(dec, tags);
+		if (tags != NULL)
 			gst_pad_push_event(dec->srcpad, gst_event_new_tag(tags));
 	}
 
@@ -1415,7 +1423,10 @@ static void gst_nonstream_audio_decoder_update_subsong_duration(GstNonstreamAudi
 
 	tags = gst_tag_list_new_empty();
 	gst_tag_list_add(tags, GST_TAG_MERGE_REPLACE, GST_TAG_DURATION, duration, NULL);
-	gst_pad_push_event(dec->srcpad, gst_event_new_tag(tags));
+	tags = gst_nonstream_audio_decoder_add_main_tags(dec, tags);
+	if (tags)
+		gst_pad_push_event(dec->srcpad, gst_event_new_tag(tags));
+
 	dec->subsong_duration = duration;
 
 	gst_element_post_message(GST_ELEMENT(dec), gst_message_new_duration_changed(GST_OBJECT(dec)));
@@ -1644,6 +1655,35 @@ static gboolean gst_nonstream_audio_decoder_do_seek(GstNonstreamAudioDecoder *de
 	gst_event_unref(event);
 
 	return res;
+}
+
+
+static GstTagList * gst_nonstream_audio_decoder_add_main_tags(GstNonstreamAudioDecoder *dec, GstTagList *tags)
+{
+	GstNonstreamAudioDecoderClass *klass = GST_NONSTREAM_AUDIO_DECODER_GET_CLASS(dec);
+
+	if (!klass->get_main_tags)
+		return tags;
+
+	tags = gst_tag_list_make_writable(tags);
+	if (tags)
+	{
+		/* Get main tags. If some exist, merge them with the given tags,
+		 * and return the merged result. Otherwise, just return the given tags. */
+		GstTagList *main_tags = klass->get_main_tags(dec);
+		if (main_tags)
+		{
+			tags = gst_tag_list_merge(main_tags, tags, GST_TAG_MERGE_REPLACE);
+			gst_tag_list_unref(main_tags);
+		}
+
+		return tags;
+	}
+	else
+	{
+		GST_ERROR_OBJECT(dec, "could not make subsong tags writable");
+		return NULL;
+	}
 }
 
 
@@ -1937,7 +1977,10 @@ GstBuffer* gst_nonstream_audio_decoder_allocate_output_buffer(GstNonstreamAudioD
 		 * to make sure the right allocator and the right allocation
 		 * params are used */
 		if (!gst_nonstream_audio_decoder_negotiate(dec))
+		{
+			GST_ERROR_OBJECT(dec, "could not allocate output buffer because negotation failed");
 			return NULL;
+		}
 	}
 
 	return gst_buffer_new_allocate(dec->allocator, size, &(dec->allocation_params));

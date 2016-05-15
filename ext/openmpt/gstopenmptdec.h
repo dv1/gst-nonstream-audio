@@ -37,6 +37,8 @@ struct _GstOpenMptDec
 	gint sample_rate, num_channels;
 
 	guint output_buffer_size;
+
+	GstTagList *main_tags;
 };
 
 

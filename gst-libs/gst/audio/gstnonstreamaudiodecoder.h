@@ -187,6 +187,13 @@ struct _GstNonstreamAudioDecoder
  *                              Loads the media in a way defined by the custom sink. Data is not supplied;
  *                              the derived class has to handle this on its own. Otherwise, this function is
  *                              identical to @load_from_buffer.
+ * @get_main_tags:              Optional.
+ *                              Returns a tag list containing the main song tags, or NULL if there are
+ *                              no such tags. Returned tags will be unref'd. Use this vfunc instead of
+ *                              manually pushing a tag event downstream to avoid edge cases where not yet
+ *                              pushed sticky tag events get overwritten before they are pushed (can for
+ *                              example happen with decodebin if tags are pushed downstream before the
+ *                              decodebin pads are linked).
  * @set_current_subsong:        Optional.
  *                              Sets the current subsong. This function is allowed to switch to a different
  *                              subsong than the required one, and can optionally make use of the suggested initial
@@ -211,7 +218,8 @@ struct _GstNonstreamAudioDecoder
  * @get_subsong_duration:       Optional.
  *                              Returns the duration of a subsong. Returns GST_CLOCK_TIME_NONE if duration is unknown.
  * @get_subsong_tags:           Optional.
- *                              Returns tags for a subsong. Returns NULL if there are no tags.
+ *                              Returns tags for a subsong, or NULL if there are no tags.
+ *                              Returned tags will be unref'd.
  * @set_num_loops:              Optional.
  *                              Sets the number of loops for playback. If this is called during playback,
  *                              the subclass must set any internal loop counters to zero. A loop value of -1
@@ -278,6 +286,8 @@ struct _GstNonstreamAudioDecoderClass
 
 	gboolean (*load_from_buffer)(GstNonstreamAudioDecoder *dec, GstBuffer *source_data, guint initial_subsong, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode, gint *initial_num_loops);
 	gboolean (*load_from_custom)(GstNonstreamAudioDecoder *dec, guint initial_subsong, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode, gint *initial_num_loops);
+
+	GstTagList* (*get_main_tags)(GstNonstreamAudioDecoder *dec);
 
 	gboolean (*set_current_subsong)(GstNonstreamAudioDecoder *dec, guint subsong, GstClockTime *initial_position);
 	guint    (*get_current_subsong)(GstNonstreamAudioDecoder *dec);
