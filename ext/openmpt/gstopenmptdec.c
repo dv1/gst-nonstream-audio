@@ -1,3 +1,39 @@
+/*
+ *   OpenMPT module music decoder based on the nonstream-audio GStreamer base class
+ *   Copyright (C) 2013-2016 Carlos Rafael Giani
+ *
+ *   This library is free software; you can redistribute it and/or
+ *   modify it under the terms of the GNU Lesser General Public
+ *   License as published by the Free Software Foundation; either
+ *   version 2.1 of the License, or (at your option) any later version.
+ *
+ *   This library is distributed in the hope that it will be useful,
+ *   but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ *   Lesser General Public License for more details.
+ *
+ *   You should have received a copy of the GNU Lesser General Public
+ *   License along with this library; if not, write to the Free Software
+ *   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+ */
+
+/**
+ * SECTION:element-openmptdec
+ * @see_also: #GstOpenMptDec
+ *
+ * openmpdec decodes module music formats, such as S3M, MOD, XM, IT.
+ * It uses the <ulink url="https://lib.openmpt.org">OpenMPT library</ulink>
+ * for this purpose. It can be autoplugged and therefore works with decodebin.
+ *
+ * <refsect2>
+ * <title>Example launch line</title>
+ * |[
+ * gst-launch-1.0 filesrc location=media/example.it ! openmptdec ! audioconvert ! audioresample ! autoaudiosink
+ * ]|
+ * </refsect2>
+ */
+
+
 #include <config.h>
 #include <gst/gst.h>
 
@@ -14,7 +50,8 @@ enum
 	PROP_MASTER_GAIN,
 	PROP_STEREO_SEPARATION,
 	PROP_FILTER_LENGTH,
-	PROP_VOLUME_RAMPING
+	PROP_VOLUME_RAMPING,
+	PROP_OUTPUT_BUFFER_SIZE
 };
 
 
@@ -22,28 +59,22 @@ enum
 #define DEFAULT_STEREO_SEPARATION 100
 #define DEFAULT_FILTER_LENGTH 0
 #define DEFAULT_VOLUME_RAMPING -1
+#define DEFAULT_OUTPUT_BUFFER_SIZE 1024
 
 #define DEFAULT_SAMPLE_FORMAT GST_AUDIO_FORMAT_F32
 #define DEFAULT_SAMPLE_RATE 48000
 #define DEFAULT_NUM_CHANNELS 2
 
 
-#define NUM_SAMPLES_PER_OUTBUF 1024
-
-
-
-#if GST_CHECK_VERSION(1, 2, 0)
-#define MOD_CAPS_TYPESTR ", type = (string) { 669, asylum-amf, dsmi-amf, extreme-ams, velvet-ams, dbm, digi, dmf, dsm, far, gdm, imf, it, j2b, mdl, med, mod, mt2, mtm, okt, psm, ptm, s3m, stm, ult, xm }"
-#else
-#define MOD_CAPS_TYPESTR ""
-#endif
-
 
 static GstStaticPadTemplate sink_template = GST_STATIC_PAD_TEMPLATE(
 	"sink",
 	GST_PAD_SINK,
 	GST_PAD_ALWAYS,
-	GST_STATIC_CAPS("audio/x-mod " MOD_CAPS_TYPESTR)
+	GST_STATIC_CAPS(
+		"audio/x-mod, "
+		"type = (string) { 669, asylum-amf, dsmi-amf, extreme-ams, velvet-ams, dbm, digi, dmf, dsm, far, gdm, imf, it, j2b, mdl, med, mod, mt2, mtm, okt, psm, ptm, s3m, stm, ult, xm }"
+	)
 );
 
 static GstStaticPadTemplate src_template = GST_STATIC_PAD_TEMPLATE(
@@ -54,7 +85,7 @@ static GstStaticPadTemplate src_template = GST_STATIC_PAD_TEMPLATE(
 		"audio/x-raw, "
 		"format = (string) { " GST_AUDIO_NE(F32) ", " GST_AUDIO_NE(S16) " }, "
 		"layout = (string) interleaved, "
-		"rate = (int) [ 1, 96000 ], "
+		"rate = (int) [ 1, 192000 ], "
 		"channels = (int) { 2, 4, 1 } "
 	)
 );
@@ -74,6 +105,7 @@ static gboolean gst_openmpt_dec_seek(GstNonstreamAudioDecoder *dec, GstClockTime
 static GstClockTime gst_openmpt_dec_tell(GstNonstreamAudioDecoder *dec);
 
 static void gst_openmpt_dec_log_func(char const *message, void *user);
+static void gst_openmpt_dec_add_metadata_to_tag_list(GstOpenMptDec *openmpt_dec, GstTagList *tags, char const *key, gchar const *tag);
 static gboolean gst_openmpt_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, GstBuffer *source_data, guint initial_subsong, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode, gint *initial_num_loops);
 
 static gboolean gst_openmpt_dec_set_current_subsong(GstNonstreamAudioDecoder *dec, guint subsong, GstClockTime *initial_position);
@@ -97,7 +129,7 @@ void gst_openmpt_dec_class_init(GstOpenMptDecClass *klass)
 	GstElementClass *element_class;
 	GstNonstreamAudioDecoderClass *dec_class;
 
-	GST_DEBUG_CATEGORY_INIT(openmptdec_debug, "openmptdec", 0, "video game music player");
+	GST_DEBUG_CATEGORY_INIT(openmptdec_debug, "openmptdec", 0, "OpenMPT-based module music decoder");
 
 	object_class = G_OBJECT_CLASS(klass);
 	element_class = GST_ELEMENT_CLASS(klass);
@@ -125,9 +157,9 @@ void gst_openmpt_dec_class_init(GstOpenMptDecClass *klass)
 
 	gst_element_class_set_static_metadata(
 		element_class,
-		"OpenMPT module player",
+		"OpenMPT-based module music decoder",
 		"Codec/Decoder/Audio",
-		"Plays module files (MOD/S3M/XM/IT/MTM/...) using OpenMPT",
+		"Decoders module files (MOD/S3M/XM/IT/MTM/...) using OpenMPT",
 		"Carlos Rafael Giani <dv@pseudoterminal.org>"
 	);
 
@@ -179,6 +211,18 @@ void gst_openmpt_dec_class_init(GstOpenMptDecClass *klass)
 			G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS
 		)
 	);
+	g_object_class_install_property(
+		object_class,
+		PROP_OUTPUT_BUFFER_SIZE,
+		g_param_spec_uint(
+			"output-buffer-size",
+			"Output buffer size",
+			"Size of each output buffer, in samples (actual size can be smaller than this during flush or EOS)",
+			1, G_MAXUINT / (4 * 4), /* 4*4 => quad output with F32 samples; this ensures that no overflow can happen */
+			DEFAULT_OUTPUT_BUFFER_SIZE,
+			G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS
+		)
+	);
 }
 
 
@@ -196,6 +240,7 @@ void gst_openmpt_dec_init(GstOpenMptDec *openmpt_dec)
 	openmpt_dec->stereo_separation = DEFAULT_STEREO_SEPARATION;
 	openmpt_dec->filter_length = DEFAULT_FILTER_LENGTH;
 	openmpt_dec->volume_ramping = DEFAULT_VOLUME_RAMPING;
+	openmpt_dec->output_buffer_size = DEFAULT_OUTPUT_BUFFER_SIZE;
 
 	openmpt_dec->sample_format = DEFAULT_SAMPLE_FORMAT;
 	openmpt_dec->sample_rate = DEFAULT_SAMPLE_RATE;
@@ -269,6 +314,14 @@ static void gst_openmpt_dec_set_property(GObject *object, guint prop_id, const G
 			break;
 		}
 
+		case PROP_OUTPUT_BUFFER_SIZE:
+		{
+			GST_NONSTREAM_AUDIO_DECODER_LOCK_MUTEX(dec);
+			openmpt_dec->output_buffer_size = g_value_get_uint(value);
+			GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(dec);
+			break;
+		}
+
 		default:
 			G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
 			break;
@@ -314,6 +367,14 @@ static void gst_openmpt_dec_get_property(GObject *object, guint prop_id, GValue 
 			break;
 		}
 
+		case PROP_OUTPUT_BUFFER_SIZE:
+		{
+			GST_NONSTREAM_AUDIO_DECODER_LOCK_MUTEX(object);
+			g_value_set_uint(value, openmpt_dec->output_buffer_size);
+			GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(object);
+			break;
+		}
+
 		default:
 			G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
 			break;
@@ -348,6 +409,45 @@ static void gst_openmpt_dec_log_func(char const *message, void *user)
 }
 
 
+static void gst_openmpt_dec_add_metadata_to_tag_list(GstOpenMptDec *openmpt_dec, GstTagList *tags, char const *key, gchar const *tag)
+{
+	char const *metadata = openmpt_module_get_metadata(openmpt_dec->mod, key);
+
+	if (metadata && *metadata)
+	{
+		GST_DEBUG_OBJECT(openmpt_dec, "adding metadata \"%s\" with key \"%s\" to tag list as tag \"%s\"", metadata, key, tag);
+
+		if (g_strcmp0(tag, GST_TAG_DATE_TIME) == 0)
+		{
+			/* Special handling for date-time tags - interpret the
+			 * metadata string as an iso8601 string and convert it
+			 * to a GstDateTime value, since this is the data type
+			 * that GST_TAG_DATE_TIME expects. */
+
+			GstDateTime *date_time = gst_date_time_new_from_iso8601_string(metadata);
+			if (date_time)
+			{
+				GST_DEBUG_OBJECT(openmpt_dec, "successfully created date-time object out of iso8601 string");
+				gst_tag_list_add(tags, GST_TAG_MERGE_REPLACE, tag, date_time, NULL);
+				gst_date_time_unref(date_time);
+			}
+			else
+				GST_WARNING_OBJECT(openmpt_dec, "could not create date-time object out of iso8601 string - not adding metadata to tags");
+		}
+		else
+		{
+			/* Default handling - just insert the metadata string as-is */
+			gst_tag_list_add(tags, GST_TAG_MERGE_REPLACE, tag, metadata, NULL);
+		}
+	}
+	else
+		GST_DEBUG_OBJECT(openmpt_dec, "attempted to add metadata with key \"%s\" to tag list as tag \"%s\", but none exists", key, tag);
+
+	if (metadata)
+		openmpt_free_string(metadata);
+}
+
+
 static gboolean gst_openmpt_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, GstBuffer *source_data, guint initial_subsong, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode, gint *initial_num_loops)
 {
 	GstMapInfo map;
@@ -355,6 +455,7 @@ static gboolean gst_openmpt_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, 
 	
 	openmpt_dec = GST_OPENMPT_DEC(dec);
 
+	/* First, determine the sample rate, channel count, and sample format to use */
 	openmpt_dec->sample_format = DEFAULT_SAMPLE_FORMAT;
 	openmpt_dec->sample_rate = DEFAULT_SAMPLE_RATE;
 	openmpt_dec->num_channels = DEFAULT_NUM_CHANNELS;
@@ -369,6 +470,7 @@ static gboolean gst_openmpt_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, 
 	))
 		return FALSE;
 
+	/* Pass the module data to OpenMPT for loading */
 	gst_buffer_map(source_data, &map, GST_MAP_READ);
 	openmpt_dec->mod = openmpt_module_create_from_memory(map.data, map.size, gst_openmpt_dec_log_func, dec, NULL);
 	gst_buffer_unmap(source_data, &map);
@@ -379,31 +481,27 @@ static gboolean gst_openmpt_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, 
 		return FALSE;
 	}
 
-	{
-		char const *metadata_keys = openmpt_module_get_metadata_keys(openmpt_dec->mod);
-		if (metadata_keys != NULL)
-		{
-			GST_DEBUG_OBJECT(dec, "metadata keys: [%s]", metadata_keys);
-			openmpt_free_string(metadata_keys);
-		}
-		else
-		{
-			GST_DEBUG_OBJECT(dec, "no metadata keys found");
-		}
-	}
-
+	/* Query the number of subsongs available for logging and for checking
+	 * the initial subsong index */
 	openmpt_dec->num_subsongs = openmpt_module_get_num_subsongs(openmpt_dec->mod);
 	if (G_UNLIKELY(initial_subsong >= openmpt_dec->num_subsongs))
 	{
 		GST_WARNING_OBJECT(openmpt_dec, "initial subsong %u out of bounds (there are %u subsongs) - setting it to 0", initial_subsong, openmpt_dec->num_subsongs);
 		initial_subsong = 0;
 	}
-
 	GST_INFO_OBJECT(openmpt_dec, "%d subsong(s) available", openmpt_dec->num_subsongs);
 
-	*initial_position = 0;
+	/* Seek to initial position */
+	if (*initial_position != 0)
+	{
+		openmpt_module_set_position_seconds(openmpt_dec->mod, (double)(*initial_position) / GST_SECOND);
+		*initial_position = (GstClockTime)(openmpt_module_get_position_seconds(openmpt_dec->mod) * GST_SECOND);
+	}
+
+	/* LOOPING output mode is not supported */
 	*initial_output_mode = GST_NONSTREM_AUDIO_OUTPUT_MODE_STEADY;
 
+	/* Query the durations of each subsong (if any exist) */
 	if (openmpt_dec->num_subsongs > 0)
 	{
 		guint i;
@@ -422,38 +520,65 @@ static gboolean gst_openmpt_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, 
 		}
 	}
 
+	/* Select the initial subsong */
 	openmpt_module_select_subsong(openmpt_dec->mod, initial_subsong);
-	openmpt_module_set_repeat_count(openmpt_dec->mod, openmpt_dec->num_loops);
+
+	/* Set the number of loops, and query the actual number
+	 * that was chosen by OpenMPT */
+	{
+		int32_t actual_repeat_count;
+		openmpt_module_set_repeat_count(openmpt_dec->mod, *initial_num_loops);
+		actual_repeat_count = openmpt_module_get_repeat_count(openmpt_dec->mod);
+
+		if (actual_repeat_count != *initial_num_loops)
+		{
+			GST_DEBUG_OBJECT(openmpt_dec, "requested num-loops value %d differs from actual value %d", *initial_num_loops, actual_repeat_count);
+			*initial_num_loops = actual_repeat_count;
+		}
+	}
+
+	/* Set render parameters (adjustable via properties) */
 	openmpt_module_set_render_param(openmpt_dec->mod, OPENMPT_MODULE_RENDER_MASTERGAIN_MILLIBEL, openmpt_dec->master_gain);
 	openmpt_module_set_render_param(openmpt_dec->mod, OPENMPT_MODULE_RENDER_STEREOSEPARATION_PERCENT, openmpt_dec->stereo_separation);
 	openmpt_module_set_render_param(openmpt_dec->mod, OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH, openmpt_dec->filter_length);
 	openmpt_module_set_render_param(openmpt_dec->mod, OPENMPT_MODULE_RENDER_VOLUMERAMPING_STRENGTH, openmpt_dec->volume_ramping);
 
+	/* Log the available metadata keys, and produce a
+	 * tag list if any keys are available */
 	{
-		GstTagList *tags;
-		char const *metadata;
+		char const *metadata_keys = openmpt_module_get_metadata_keys(openmpt_dec->mod);
+		if (metadata_keys != NULL)
+		{
+			GstTagList *tags = gst_tag_list_new_empty();
 
-		tags = gst_tag_list_new_empty();
+			GST_DEBUG_OBJECT(dec, "metadata keys: [%s]", metadata_keys);
+			openmpt_free_string(metadata_keys);
 
-#define GSTOPENMPT_ADD_TO_TAGS(KEY, TAG_TYPE) \
-		metadata = openmpt_module_get_metadata(openmpt_dec->mod, (KEY)); \
-		if (metadata && *metadata) \
-		{ \
-			gst_tag_list_add(tags, GST_TAG_MERGE_REPLACE, (TAG_TYPE), metadata, NULL); \
-		} \
-		if (metadata) \
-		{ \
-			openmpt_free_string(metadata); \
+			gst_openmpt_dec_add_metadata_to_tag_list(openmpt_dec, tags, "title",          GST_TAG_TITLE);
+			gst_openmpt_dec_add_metadata_to_tag_list(openmpt_dec, tags, "artist",         GST_TAG_ARTIST);
+			gst_openmpt_dec_add_metadata_to_tag_list(openmpt_dec, tags, "message",        GST_TAG_COMMENT);
+			gst_openmpt_dec_add_metadata_to_tag_list(openmpt_dec, tags, "tracker",        GST_TAG_APPLICATION_NAME);
+			gst_openmpt_dec_add_metadata_to_tag_list(openmpt_dec, tags, "type_long",      GST_TAG_CODEC);
+			gst_openmpt_dec_add_metadata_to_tag_list(openmpt_dec, tags, "date",           GST_TAG_DATE_TIME);
+			gst_openmpt_dec_add_metadata_to_tag_list(openmpt_dec, tags, "container_long", GST_TAG_CONTAINER_FORMAT);
+
+			gst_pad_push_event(GST_NONSTREAM_AUDIO_DECODER_SRC_PAD(openmpt_dec), gst_event_new_tag(tags));
 		}
+		else
+		{
+			GST_DEBUG_OBJECT(dec, "no metadata keys found - not producing a tag list");
+		}
+	}
 
-		GSTOPENMPT_ADD_TO_TAGS("title", GST_TAG_TITLE);
-		GSTOPENMPT_ADD_TO_TAGS("artist", GST_TAG_ARTIST);
-		GSTOPENMPT_ADD_TO_TAGS("message", GST_TAG_COMMENT);
-		GSTOPENMPT_ADD_TO_TAGS("tracker", GST_TAG_APPLICATION_NAME);
-
-#undef GSTOPENMPT_ADD_TO_TAGS
-
-		gst_pad_push_event(GST_NONSTREAM_AUDIO_DECODER_SRC_PAD(openmpt_dec), gst_event_new_tag(tags));
+	/* Log any warnings that were produced by OpenMPT while loading */
+	{
+		char const *warnings = openmpt_module_get_metadata(openmpt_dec->mod, "warnings");
+		if (warnings)
+		{
+			if (*warnings)
+				GST_WARNING_OBJECT(openmpt_dec, "reported warnings during loading: %s", warnings);
+			openmpt_free_string(warnings);
+		}
 	}
 
 	return TRUE;
@@ -465,12 +590,18 @@ static gboolean gst_openmpt_dec_set_current_subsong(GstNonstreamAudioDecoder *de
 	GstOpenMptDec *openmpt_dec = GST_OPENMPT_DEC(dec);
 	g_return_val_if_fail(openmpt_dec->mod != NULL, FALSE);
 
-	openmpt_module_select_subsong(openmpt_dec->mod, subsong);
-
-	openmpt_dec->cur_subsong = subsong;
-	*initial_position = 0;
-
-	return TRUE;
+	if (openmpt_module_select_subsong(openmpt_dec->mod, subsong))
+	{
+		GST_DEBUG_OBJECT(openmpt_dec, "selected subsong %u", subsong);
+		openmpt_dec->cur_subsong = subsong;
+		*initial_position = 0;
+		return TRUE;
+	}
+	else
+	{
+		GST_ERROR_OBJECT(openmpt_dec, "could not select subsong %u", subsong);
+		return FALSE;
+	}
 }
 
 
@@ -505,9 +636,16 @@ static GstTagList* gst_openmpt_dec_get_subsong_tags(GstNonstreamAudioDecoder *de
 	name = openmpt_module_get_subsong_name(openmpt_dec->mod, subsong);
 	if (name != NULL)
 	{
-		GstTagList *tags = gst_tag_list_new_empty();
-		gst_tag_list_add(tags, GST_TAG_MERGE_REPLACE, "title", name, NULL);
+		GstTagList *tags = NULL;
+
+		if (*name)
+		{
+			tags = gst_tag_list_new_empty();
+			gst_tag_list_add(tags, GST_TAG_MERGE_REPLACE, "title", name, NULL);
+		}
+
 		openmpt_free_string(name);
+
 		return tags;
 	}
 	else
@@ -521,7 +659,18 @@ static gboolean gst_openmpt_dec_set_num_loops(GstNonstreamAudioDecoder *dec, gin
 	openmpt_dec->num_loops = num_loops;
 
 	if (openmpt_dec->mod != NULL)
-		return openmpt_module_set_repeat_count(openmpt_dec->mod, num_loops);
+	{
+		if (openmpt_module_set_repeat_count(openmpt_dec->mod, num_loops))
+		{
+			GST_DEBUG_OBJECT(openmpt_dec, "successfully set repeat count %d", num_loops);
+			return TRUE;
+		}
+		else
+		{
+			GST_ERROR_OBJECT(openmpt_dec, "could not set repeat count %d", num_loops);
+			return FALSE;
+		}
+	}
 	else
 		return TRUE;
 }
@@ -546,15 +695,20 @@ static gboolean gst_openmpt_dec_decode(GstNonstreamAudioDecoder *dec, GstBuffer 
 	GstBuffer *outbuf;
 	GstMapInfo map;
 	size_t num_read_samples;
+	gsize outbuf_size;
 	GstAudioFormatInfo const *fmt_info;
 
 	openmpt_dec = GST_OPENMPT_DEC(dec);
 
 	fmt_info = gst_audio_format_get_info(openmpt_dec->sample_format);
 
-	outbuf = gst_nonstream_audio_decoder_allocate_output_buffer(dec, NUM_SAMPLES_PER_OUTBUF * (fmt_info->width / 8) * openmpt_dec->num_channels);
+	/* Allocate output buffer */
+	outbuf_size = openmpt_dec->output_buffer_size * (fmt_info->width / 8) * openmpt_dec->num_channels;
+	outbuf = gst_nonstream_audio_decoder_allocate_output_buffer(dec, outbuf_size);
 	if (G_UNLIKELY(outbuf == NULL))
 		return FALSE;
+
+	/* Write samples into the output buffer */
 
 	gst_buffer_map(outbuf, &map, GST_MAP_WRITE);
 
@@ -566,13 +720,13 @@ static gboolean gst_openmpt_dec_decode(GstNonstreamAudioDecoder *dec, GstBuffer 
 			switch (openmpt_dec->num_channels)
 			{
 				case 1:
-					num_read_samples = openmpt_module_read_mono(openmpt_dec->mod, openmpt_dec->sample_rate, NUM_SAMPLES_PER_OUTBUF, out_samples);
+					num_read_samples = openmpt_module_read_mono(openmpt_dec->mod, openmpt_dec->sample_rate, openmpt_dec->output_buffer_size, out_samples);
 					break;
 				case 2:
-					num_read_samples = openmpt_module_read_interleaved_stereo(openmpt_dec->mod, openmpt_dec->sample_rate, NUM_SAMPLES_PER_OUTBUF, out_samples);
+					num_read_samples = openmpt_module_read_interleaved_stereo(openmpt_dec->mod, openmpt_dec->sample_rate, openmpt_dec->output_buffer_size, out_samples);
 					break;
 				case 4:
-					num_read_samples = openmpt_module_read_interleaved_quad(openmpt_dec->mod, openmpt_dec->sample_rate, NUM_SAMPLES_PER_OUTBUF, out_samples);
+					num_read_samples = openmpt_module_read_interleaved_quad(openmpt_dec->mod, openmpt_dec->sample_rate, openmpt_dec->output_buffer_size, out_samples);
 					break;
 				default:
 					g_assert_not_reached();
@@ -585,13 +739,13 @@ static gboolean gst_openmpt_dec_decode(GstNonstreamAudioDecoder *dec, GstBuffer 
 			switch (openmpt_dec->num_channels)
 			{
 				case 1:
-					num_read_samples = openmpt_module_read_float_mono(openmpt_dec->mod, openmpt_dec->sample_rate, NUM_SAMPLES_PER_OUTBUF, out_samples);
+					num_read_samples = openmpt_module_read_float_mono(openmpt_dec->mod, openmpt_dec->sample_rate, openmpt_dec->output_buffer_size, out_samples);
 					break;
 				case 2:
-					num_read_samples = openmpt_module_read_interleaved_float_stereo(openmpt_dec->mod, openmpt_dec->sample_rate, NUM_SAMPLES_PER_OUTBUF, out_samples);
+					num_read_samples = openmpt_module_read_interleaved_float_stereo(openmpt_dec->mod, openmpt_dec->sample_rate, openmpt_dec->output_buffer_size, out_samples);
 					break;
 				case 4:
-					num_read_samples = openmpt_module_read_interleaved_float_quad(openmpt_dec->mod, openmpt_dec->sample_rate, NUM_SAMPLES_PER_OUTBUF, out_samples);
+					num_read_samples = openmpt_module_read_interleaved_float_quad(openmpt_dec->mod, openmpt_dec->sample_rate, openmpt_dec->output_buffer_size, out_samples);
 					break;
 				default:
 					g_assert_not_reached();

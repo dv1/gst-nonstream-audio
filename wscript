@@ -36,7 +36,7 @@ def add_compiler_flags(conf, env, flags, lang, compiler, uselib = ''):
 
 
 
-plugins = {'dumb' : True, 'gme' : True, 'openmpt' : False, 'uade' : False, 'gzip' : True}
+plugins = {'dumb' : True, 'gme' : True, 'openmpt' : True, 'uade' : False, 'gzip' : True}
 
 
 

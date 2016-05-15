@@ -35,6 +35,8 @@ struct _GstOpenMptDec
 
 	GstAudioFormat sample_format;
 	gint sample_rate, num_channels;
+
+	guint output_buffer_size;
 };
 
 
