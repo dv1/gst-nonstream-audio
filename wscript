@@ -107,9 +107,9 @@ def configure(conf):
 	conf.env['WITH_STDINT'] = conf.check_cc(header_name = 'stdint.h', uselib_store = 'STDINT', mandatory = 0)
 
 	# test for GStreamer libraries
-	conf.check_cfg(package = 'gstreamer-1.0 >= 1.0.0',       uselib_store = 'GSTREAMER',       args = '--cflags --libs', mandatory = 1)
-	conf.check_cfg(package = 'gstreamer-base-1.0 >= 1.0.0',  uselib_store = 'GSTREAMER_BASE',  args = '--cflags --libs', mandatory = 1)
-	conf.check_cfg(package = 'gstreamer-audio-1.0 >= 1.0.0', uselib_store = 'GSTREAMER_AUDIO', args = '--cflags --libs', mandatory = 1)
+	conf.check_cfg(package = 'gstreamer-1.0 >= 1.2.0',       uselib_store = 'GSTREAMER',       args = '--cflags --libs', mandatory = 1)
+	conf.check_cfg(package = 'gstreamer-base-1.0 >= 1.2.0',  uselib_store = 'GSTREAMER_BASE',  args = '--cflags --libs', mandatory = 1)
+	conf.check_cfg(package = 'gstreamer-audio-1.0 >= 1.2.0', uselib_store = 'GSTREAMER_AUDIO', args = '--cflags --libs', mandatory = 1)
 	conf.env['PLUGIN_INSTALL_PATH'] = os.path.expanduser(conf.options.plugin_install_path)
 	conf.env['LIB_INSTALL_PATH'] = os.path.expanduser(conf.options.lib_install_path)
 	conf.define('GST_PACKAGE_NAME', conf.options.with_package_name)

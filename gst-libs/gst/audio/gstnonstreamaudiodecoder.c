@@ -1,6 +1,6 @@
 /*
  *   GStreamer base class for non-streaming audio decoders
- *   Copyright (C) 2013-2014 Carlos Rafael Giani
+ *   Copyright (C) 2013-2016 Carlos Rafael Giani
  *
  *   This library is free software; you can redistribute it and/or
  *   modify it under the terms of the GNU Lesser General Public
@@ -49,9 +49,9 @@
  * the "main" one. Subsongs were popular for video games to enable context-
  * aware music; for example, subsong #0 would be the "main" song, #1 would be
  * an alternate song playing when a fight started, #2 would be heard during
- * conversations etc. The base class is designed to always have subsongs. If
- * the subclass doesn't provide any, the base class creates a pseudo subsong.
- * This "subsong" is actually the whole song.
+ * conversations etc. The base class is designed to always have at least one
+ * subsong. If the subclass doesn't provide any, the base class creates a
+ * "pseudo" subsong, which is actually the whole song.
  * Downstream is informed about the subsong using a table of contents (TOC),
  * but only if there are at least 2 subsongs.
  *
@@ -69,8 +69,8 @@
  * the playback position monotonically increasing. However, seeking must
  * always happen within the confines of the defined subsong duration; for
  * example, if a subsong is 2 minutes long, steady playback is at 5 minutes
- * (because infinite looping is enabled), then it must not be possible to seek
- * past the 2 minute mark.
+ * (because infinite looping is enabled), then seeking will still place the
+ * position within the 2 minute period.
  *
  * If the initial subsong and loop count are set to values the subclass does
  * not support, the subclass has a chance to correct these values.
@@ -88,34 +88,30 @@
  *       Media is NOT loaded yet.
  *     </para></listitem>
  *     <listitem><para>
- *       Once the sinkpad is activated, the process continues. If the sinkpad
- *       is activated in push mode, the class accumulates the incoming media
+ *       Once the sinkpad is activated, the process continues. The sinkpad is
+ *       activated in push mode, and the class accumulates the incoming media
  *       data in an adapter inside the sinkpad's chain function until either an
  *       EOS event is received from upstream, or the number of bytes reported
  *       by upstream is reached. Then it loads the media, and starts the decoder
  *       output task.
- *       If the sinkpad is activated in pull mode, it starts the task; inside
- *       the decoder output task, it pulls the entire data from upstream at once.
  *     <listitem><para>
- *       In both cases, if upstream cannot respond to the size query (in bytes)
- *       of @load_from_buffer fails, an error is reported, and the pipeline
- *       stops.
+ *       If upstream cannot respond to the size query (in bytes) of @load_from_buffer
+ *       fails, an error is reported, and the pipeline stops.
  *     </para></listitem>
  *     <listitem><para>
- *       Also, in both cases, if there are no errors, @load_from_buffer is
- *       called to load the media. The subclass must at least call
- *       @gst_nonstream_audio_decoder_set_output_audioinfo there, and is free
- *       to make use of the initial subsong, output mode, and position. If the
- *       actual output mode or position differs from the initial value,
- *       it must set the initial value to the actual one (for example, if the
- *       actual starting position is always 0, set *initial_position to 0).
+ *       If there are no errors, @load_from_buffer is called to load the media.
+ *       The subclass must at least call @gst_nonstream_audio_decoder_set_output_audioinfo
+ *       there, and is free to make use of the initial subsong, output mode, and
+ *       position. If the actual output mode or position differs from the initial
+ *       value,it must set the initial value to the actual one (for example, if
+ *       the actual starting position is always 0, set *initial_position to 0).
  *       If loading is unsuccessful, an error is reported, and the pipeline
- *       stops. Otherwise, the base class @get_current_subsong to retrieve
+ *       stops. Otherwise, the base class calls @get_current_subsong to retrieve
  *       the actual current subsong, @get_subsong_duration to report the current
  *       subsong's duration in a duration event and message, and @get_subsong_tags
  *       to send tags downstream in an event (these functions are optional; if
  *       set to NULL, the associated operation is skipped). Afterwards, the base
- *       class switches to loaded mode.
+ *       class switches to loaded mode, and starts the decoder output task.
  *     </para></listitem>
  *   </itemizedlist>
  *   <itemizedlist><title>Loaded mode</title>
@@ -130,13 +126,13 @@
  *       to the beginning of the loop. In the latter case, if the output mode is
  *       set to LOOPING, the subclass must call @gst_nonstream_audio_decoder_handle_loop
  *       *after* the playback position moved to the start of the loop. In
- *       STEADY mode, the subclass must not call this function.
+ *       STEADY mode, the subclass must *not* call this function.
  *       Since many decoders only provide a callback for when the looping occurs,
- *       and that looping occurs inside the decoding operation itself, this
+ *       and that looping occurs inside the decoding operation itself, the following
  *       mechanism for subclass is suggested: set a flag inside such a callback.
- *       Then, in the next @decode call, before doing the decoding, this flag is
- *       checked; if it is set, @gst_nonstream_audio_decoder_handle_loop is
- *       called, and the flag is cleared.
+ *       Then, in the next @decode call, before doing the decoding, check this flag.
+ *       If it is set, @gst_nonstream_audio_decoder_handle_loop is called, and the
+ *       flag is cleared.
  *       (This function call is necessary in LOOPING mode because it updates the
  *       current segment and makes sure the next buffer that is sent downstream
  *       has its DISCONT flag set.)
@@ -702,7 +698,6 @@ static GstStateChangeReturn gst_nonstream_audio_decoder_change_state(GstElement 
 		case GST_STATE_CHANGE_PAUSED_TO_READY:
 		{
 			GstNonstreamAudioDecoder *dec = GST_NONSTREAM_AUDIO_DECODER(element);
-			/* TODO: is this necessary? */
 			if (!gst_nonstream_audio_decoder_stop_task(dec))
 				return GST_STATE_CHANGE_FAILURE;
 			break;
@@ -1387,7 +1382,7 @@ static void gst_nonstream_audio_decoder_update_toc(GstNonstreamAudioDecoder *dec
 		uid = g_strdup_printf("%u", i);
 		entry = gst_toc_entry_new(GST_TOC_ENTRY_TYPE_TITLE, uid);
 
-		/* TOC does not allow GST_CLOCK_TIME_NONE as a stop value */
+		/* FIXME: TOC does not allow GST_CLOCK_TIME_NONE as a stop value */
 		if (duration == GST_CLOCK_TIME_NONE)
 			duration = G_MAXINT64;
 
@@ -1722,20 +1717,28 @@ static void gst_nonstream_audio_decoder_output_task(GstNonstreamAudioDecoder *de
 		}
 	}
 
-	/* push new samples downstream */
+	/* push new samples downstream
+	 * no need to unref buffer - gst_pad_push() does it in
+	 * all cases (success and failure) */
 	flow = gst_pad_push(dec->srcpad, outbuf);
-	if (flow != GST_FLOW_OK)
+	switch (flow)
 	{
-		/* no need to unref buffer - gst_pad_push() does it in all cases (success and failure) */
-		GST_LOG_OBJECT(dec, "flow error when pushing output buffer: %s", gst_flow_get_name(flow));
-		goto pause;
+		case GST_FLOW_OK:
+			break;
+		case GST_FLOW_FLUSHING:
+			GST_LOG_OBJECT(dec, "pipeline is being flushed - pausing task");
+			goto pause;
+		default:
+			GST_ERROR_OBJECT(dec, "flow error when pushing output buffer: %s", gst_flow_get_name(flow));
+			goto pause;
 	}
 
 	return;
 
 pause:
 	GST_INFO_OBJECT(dec, "pausing task");
-	/* NOT using stop_task here, since that would cause a deadlock */
+	/* NOT using stop_task here, since that would cause a deadlock.
+	 * See the gst_pad_stop_task() documentation for details. */
 	gst_pad_pause_task(dec->srcpad);
 	return;
 pause_unlock:
