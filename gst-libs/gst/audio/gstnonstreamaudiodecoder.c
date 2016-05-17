@@ -239,6 +239,8 @@ static gboolean gst_nonstream_audio_decoder_finish_load(GstNonstreamAudioDecoder
 static gboolean gst_nonstream_audio_decoder_start_task(GstNonstreamAudioDecoder *dec);
 static gboolean gst_nonstream_audio_decoder_stop_task(GstNonstreamAudioDecoder *dec);
 
+static gboolean gst_nonstream_audio_decoder_switch_to_subsong(GstNonstreamAudioDecoder *dec, guint new_subsong);
+
 static void gst_nonstream_audio_decoder_update_toc(GstNonstreamAudioDecoder *dec, GstNonstreamAudioDecoderClass *klass);
 static void gst_nonstream_audio_decoder_update_subsong_duration(GstNonstreamAudioDecoder *dec, GstClockTime duration);
 static void gst_nonstream_audio_decoder_output_new_segment(GstNonstreamAudioDecoder *dec, GstClockTime start_position);
@@ -527,56 +529,7 @@ static void gst_nonstream_audio_decoder_set_property(GObject *object, guint prop
 			guint new_subsong = g_value_get_uint(value);
 
 			GST_NONSTREAM_AUDIO_DECODER_LOCK_MUTEX(dec);
-			if (new_subsong != dec->current_subsong)
-			{
-				gboolean proceed = TRUE;
-
-				if (dec->loaded_mode)
-				{
-					GstClockTime new_position;
-
-					if (klass->set_current_subsong != NULL)
-					{
-						if (klass->set_current_subsong(dec, new_subsong, &new_position))
-							proceed = TRUE;
-						else
-						{
-							proceed = FALSE;
-							GST_WARNING_OBJECT(dec, "switching to new subsong %u failed", new_subsong);
-						}
-					}
-					else
-						GST_DEBUG_OBJECT(dec, "cannot call set_current_subsong, since it is NULL");
-
-					if (proceed)
-					{
-						/* use the new subsong's duration (if one exists) */
-						GstClockTime new_subsong_duration = GST_CLOCK_TIME_NONE;
-						if (klass->get_subsong_duration != NULL)
-							new_subsong_duration = klass->get_subsong_duration(dec, new_subsong);
-						gst_nonstream_audio_decoder_update_subsong_duration(dec, new_subsong_duration);
-
-						/* create a new segment for the new subsong */
-						gst_nonstream_audio_decoder_output_new_segment(dec, new_position);
-
-						/* use the new subsong's tags (if any exist) */
-						if (klass->get_subsong_tags != NULL)
-						{
-							GstTagList *subsong_tags = klass->get_subsong_tags(dec, new_subsong);
-							if (subsong_tags != NULL)
-								subsong_tags = gst_nonstream_audio_decoder_add_main_tags(dec, subsong_tags);
-							if (subsong_tags != NULL)
-								gst_pad_push_event(dec->srcpad, gst_event_new_tag(subsong_tags));
-						}
-					}
-				}
-
-				if (proceed)
-				{
-					/* store new subsong in case the property is set before the media got loaded */
-					dec->current_subsong = new_subsong;
-				}
-			}
++			gst_nonstream_audio_decoder_switch_to_subsong(dec, new_subsong);
 			GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(dec);
 
 			break;
@@ -1346,6 +1299,67 @@ static gboolean gst_nonstream_audio_decoder_stop_task(GstNonstreamAudioDecoder *
 	}
 	else
 		return TRUE;
+}
+
+
+static gboolean gst_nonstream_audio_decoder_switch_to_subsong(GstNonstreamAudioDecoder *dec, guint new_subsong)
+{
+	/* must be called with lock */
+
+	gboolean ret = TRUE;
+	GstNonstreamAudioDecoderClass *klass = GST_NONSTREAM_AUDIO_DECODER_GET_CLASS(dec);
+
+	if (new_subsong == dec->current_subsong)
+		goto finish;
+
+	if (klass->set_current_subsong == NULL)
+	{
+		/* If set_current_subsong wasn't set by the subclass, then
+		 * subsongs are not supported. It is not an error if this
+		 * function is called in that case, since it might happen
+		 * because the current-subsong property was set (and since
+		 * this is a base class property, it is always available). */
+		GST_DEBUG_OBJECT(dec, "cannot call set_current_subsong, since it is NULL");
+		goto finish;
+	}
+
+	if (dec->loaded_mode)
+	{
+		GstClockTime new_position;
+		GstClockTime new_subsong_duration = GST_CLOCK_TIME_NONE;
+
+		if (!(klass->set_current_subsong(dec, new_subsong, &new_position)))
+		{
+			ret = FALSE;
+			GST_WARNING_OBJECT(dec, "switching to new subsong %u failed", new_subsong);
+			goto finish;
+		}
+
+		/* use the new subsong's duration (if one exists) */
+		if (klass->get_subsong_duration != NULL)
+			new_subsong_duration = klass->get_subsong_duration(dec, new_subsong);
+		gst_nonstream_audio_decoder_update_subsong_duration(dec, new_subsong_duration);
+
+		/* create a new segment for the new subsong */
+		gst_nonstream_audio_decoder_output_new_segment(dec, new_position);
+
+		/* use the new subsong's tags (if any exist) */
+		if (klass->get_subsong_tags != NULL)
+		{
+			GstTagList *subsong_tags = klass->get_subsong_tags(dec, new_subsong);
+			if (subsong_tags != NULL)
+				subsong_tags = gst_nonstream_audio_decoder_add_main_tags(dec, subsong_tags);
+			if (subsong_tags != NULL)
+				gst_pad_push_event(dec->srcpad, gst_event_new_tag(subsong_tags));
+		}
+	}
+
+	/* store new subsong in case the property is set before the media got loaded */
+	GST_DEBUG_OBJECT(dec, "successfully switched to new subsong %u", new_subsong);
+	dec->current_subsong = new_subsong;
+
+finish:
+	return ret;
 }
 
 
