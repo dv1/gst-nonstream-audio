@@ -1779,12 +1779,21 @@ static void gst_nonstream_audio_decoder_output_task(GstNonstreamAudioDecoder *de
 	{
 		case GST_FLOW_OK:
 			break;
+
 		case GST_FLOW_FLUSHING:
 			GST_LOG_OBJECT(dec, "pipeline is being flushed - pausing task");
 			goto pause;
+
+		case GST_FLOW_NOT_NEGOTIATED:
+			if (gst_pad_needs_reconfigure(dec->srcpad))
+			{
+				GST_DEBUG_OBJECT(dec, "trying to renegotiate");
+				break;
+			}
+			/* fallthrough to default */
+
 		default:
-			GST_ERROR_OBJECT(dec, "flow error when pushing output buffer: %s", gst_flow_get_name(flow));
-			goto pause;
+			GST_ELEMENT_ERROR(dec, STREAM, FAILED, ("Internal data flow error."), ("streaming task paused, reason %s (%d)", gst_flow_get_name(flow), flow));
 	}
 
 	return;
