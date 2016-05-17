@@ -83,10 +83,10 @@ static GstStaticPadTemplate src_template = GST_STATIC_PAD_TEMPLATE(
 	GST_PAD_ALWAYS,
 	GST_STATIC_CAPS(
 		"audio/x-raw, "
-		"format = (string) { " GST_AUDIO_NE(F32) ", " GST_AUDIO_NE(S16) " }, "
+		"format = (string) { " GST_AUDIO_NE(S16) ", " GST_AUDIO_NE(F32) " }, "
 		"layout = (string) interleaved, "
 		"rate = (int) [ 1, 192000 ], "
-		"channels = (int) { 2, 4, 1 } "
+		"channels = (int) { 1, 2, 4 } "
 	)
 );
 

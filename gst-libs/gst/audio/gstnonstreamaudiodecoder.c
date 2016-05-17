@@ -1911,57 +1911,95 @@ void gst_nonstream_audio_decoder_get_downstream_info(GstNonstreamAudioDecoder *d
 
 	g_return_if_fail(GST_IS_NONSTREAM_AUDIO_DECODER(dec));
 
-	/* Get the caps that are allowed by downstream */
-	{
-		GstCaps *allowed_srccaps_unnorm = gst_pad_get_allowed_caps(dec->srcpad);
-		GST_LOG_OBJECT(dec, "unnormalized allowed src caps: %" GST_PTR_FORMAT, (gpointer)allowed_srccaps_unnorm);
+	allowed_srccaps = gst_pad_get_allowed_caps(dec->srcpad);
 
-		allowed_srccaps = gst_caps_normalize(allowed_srccaps_unnorm);
-
-		GST_LOG_OBJECT(dec, "normalized allowed src caps: %" GST_PTR_FORMAT, (gpointer)allowed_srccaps);
-	}
-
-	ds_format_found = FALSE;
-	ds_rate_found = FALSE;
-	ds_channels_found = FALSE;
-
-	/* Go through all allowed caps, see if one of them has sample rate or number of channels set (or both) */
 	num_structures = gst_caps_get_size(allowed_srccaps);
 	GST_DEBUG_OBJECT(dec, "%u structure(s) in downstream caps", num_structures);
 	for (structure_nr = 0; structure_nr < num_structures; ++structure_nr)
 	{
 		GstStructure *structure;
-		gchar const *format_str;
 
+		ds_format_found = FALSE;
 		ds_rate_found = FALSE;
 		ds_channels_found = FALSE;
 
 		structure = gst_caps_get_structure(allowed_srccaps, structure_nr);
 
-		if ((format != NULL) && (format_str = gst_structure_get_string(structure, "format")))
+		/* If all formats which need to be queried are present in the structure,
+		 * check its contents */
+		if (((format == NULL) || gst_structure_has_field(structure, "format")) &&
+		    ((sample_rate == NULL) || gst_structure_has_field(structure, "rate")) &&
+		    ((num_channels == NULL) || gst_structure_has_field(structure, "channels")))
 		{
-			GstAudioFormat fmt = gst_audio_format_from_string(format_str);
-			if (fmt == GST_AUDIO_FORMAT_UNKNOWN)
-				GST_WARNING_OBJECT(dec, "caps structure %" GST_PTR_FORMAT " does not contain a valid format", (gpointer)structure);
-			else
+			gint fixated_sample_rate;
+			gint fixated_num_channels;
+			GstAudioFormat fixated_format;
+			GstStructure *fixated_str;
+			gboolean passed = TRUE;
+
+			/* Make a copy of the structure, since we need to modify
+			 * (fixate) values inside */
+			fixated_str = gst_structure_copy(structure);
+
+			/* Try to fixate and retrieve the sample format */
+			if (passed && (format != NULL))
 			{
-				GST_DEBUG_OBJECT(dec, "got format from structure #%u : %s", structure_nr, format_str);
-				ds_format_found = TRUE;
+				passed = FALSE;
+
+				if ((gst_structure_get_field_type(fixated_str, "format") == G_TYPE_STRING) || gst_structure_fixate_field_string(fixated_str, "format", gst_audio_format_to_string(*format)))
+				{
+					gchar const *fmt_str = gst_structure_get_string(fixated_str, "format");
+					if (fmt_str && ((fixated_format = gst_audio_format_from_string(fmt_str)) != GST_AUDIO_FORMAT_UNKNOWN))
+					{
+						GST_DEBUG_OBJECT(dec, "found fixated format: %s", fmt_str);
+						ds_format_found = TRUE;
+						passed = TRUE;
+					}
+				}
+			}
+
+			/* Try to fixate and retrieve the sample rate */
+			if (passed && (sample_rate != NULL))
+			{
+				passed = FALSE;
+
+				if ((gst_structure_get_field_type(fixated_str, "rate") == G_TYPE_INT) || gst_structure_fixate_field_nearest_int(fixated_str, "rate", *sample_rate))
+				{
+					if (gst_structure_get_int(fixated_str, "rate", &fixated_sample_rate))
+					{
+						GST_DEBUG_OBJECT(dec, "found fixated sample rate: %d", fixated_sample_rate);
+						ds_rate_found = TRUE;
+						passed = TRUE;
+					}
+				}
+			}
+
+			/* Try to fixate and retrieve the channel count */
+			if (passed && (num_channels != NULL))
+			{
+				passed = FALSE;
+
+				if ((gst_structure_get_field_type(fixated_str, "channels") == G_TYPE_INT) || gst_structure_fixate_field_nearest_int(fixated_str, "channels", *num_channels))
+				{
+					if (gst_structure_get_int(fixated_str, "channels", &fixated_num_channels))
+					{
+						GST_DEBUG_OBJECT(dec, "found fixated channel count: %d", fixated_num_channels);
+						ds_channels_found = TRUE;
+						passed = TRUE;
+					}
+				}
+			}
+
+			gst_structure_free(fixated_str);
+
+			if (ds_format_found && ds_rate_found && ds_channels_found)
+			{
+				*format = fixated_format;
+				*sample_rate = fixated_sample_rate;
+				*num_channels = fixated_num_channels;
+				break;
 			}
 		}
-		if ((sample_rate != NULL) && gst_structure_get_int(structure, "rate", sample_rate))
-		{
-			GST_DEBUG_OBJECT(dec, "got sample rate from structure #%u : %d Hz", structure_nr, *sample_rate);
-			ds_rate_found = TRUE;
-		}
-		if ((num_channels != NULL) && gst_structure_get_int(structure, "channels", num_channels))
-		{
-			GST_DEBUG_OBJECT(dec, "got number of channels from structure #%u : %u channels", structure_nr, *num_channels);
-			ds_channels_found = TRUE;
-		}
-
-		if (ds_format_found || ds_rate_found || ds_channels_found)
-			break;
 	}
 
 	gst_caps_unref(allowed_srccaps);
