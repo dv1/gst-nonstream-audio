@@ -529,7 +529,7 @@ static void gst_nonstream_audio_decoder_set_property(GObject *object, guint prop
 			guint new_subsong = g_value_get_uint(value);
 
 			GST_NONSTREAM_AUDIO_DECODER_LOCK_MUTEX(dec);
-+			gst_nonstream_audio_decoder_switch_to_subsong(dec, new_subsong);
+			gst_nonstream_audio_decoder_switch_to_subsong(dec, new_subsong);
 			GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(dec);
 
 			break;
