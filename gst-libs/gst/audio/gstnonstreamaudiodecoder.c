@@ -18,6 +18,7 @@
  */
 
 
+#include <stdio.h>
 #include <gst/gst.h>
 #include <gst/audio/audio.h>
 
@@ -828,6 +829,34 @@ static gboolean gst_nonstream_audio_decoder_src_event(GstPad *pad, GstObject *pa
 		case GST_EVENT_SEEK:
 		{
 			res = gst_nonstream_audio_decoder_do_seek(dec, event);
+			break;
+		}
+
+		case GST_EVENT_TOC_SELECT:
+		{
+			/* NOTE: This event may be received multiple times if it
+			 * was originally sent to a bin containing multiple sink
+			 * elements (for example, playbin). This is OK and does
+			 * not break anything. */
+
+			gchar *uid = NULL;
+			guint subsong_idx = 0;
+
+			gst_event_parse_toc_select(event, &uid);
+
+			if ((uid != NULL) && (sscanf(uid, "nonstream-subsong-%05u", &subsong_idx) == 1))
+			{
+				GST_DEBUG_OBJECT(dec, "received TOC select event, switching to subsong %u", subsong_idx);
+
+				GST_NONSTREAM_AUDIO_DECODER_LOCK_MUTEX(dec);
+				gst_nonstream_audio_decoder_switch_to_subsong(dec, subsong_idx);
+				GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(dec);
+			}
+
+			g_free(uid);
+
+			res = TRUE;
+
 			break;
 		}
 
