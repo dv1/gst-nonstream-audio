@@ -284,6 +284,10 @@ static GType gst_nonstream_audio_decoder_output_mode_get_type(void)
 
 
 
+/* Manually defining the GType instead of using G_DEFINE_TYPE_WITH_CODE()
+ * because the _init() function needs to be able to access the derived
+ * class' sink- and srcpads */
+
 
 GType gst_nonstream_audio_decoder_get_type(void)
 {
