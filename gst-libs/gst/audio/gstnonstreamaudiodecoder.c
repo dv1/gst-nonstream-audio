@@ -240,7 +240,7 @@ static gboolean gst_nonstream_audio_decoder_finish_load(GstNonstreamAudioDecoder
 static gboolean gst_nonstream_audio_decoder_start_task(GstNonstreamAudioDecoder *dec);
 static gboolean gst_nonstream_audio_decoder_stop_task(GstNonstreamAudioDecoder *dec);
 
-static gboolean gst_nonstream_audio_decoder_switch_to_subsong(GstNonstreamAudioDecoder *dec, guint new_subsong);
+static gboolean gst_nonstream_audio_decoder_switch_to_subsong(GstNonstreamAudioDecoder *dec, guint new_subsong, guint32 const *seqnum);
 
 static void gst_nonstream_audio_decoder_update_toc(GstNonstreamAudioDecoder *dec, GstNonstreamAudioDecoderClass *klass);
 static void gst_nonstream_audio_decoder_update_subsong_duration(GstNonstreamAudioDecoder *dec, GstClockTime duration);
@@ -532,10 +532,7 @@ static void gst_nonstream_audio_decoder_set_property(GObject *object, guint prop
 		case PROP_CURRENT_SUBSONG:
 		{
 			guint new_subsong = g_value_get_uint(value);
-
-			GST_NONSTREAM_AUDIO_DECODER_LOCK_MUTEX(dec);
-			gst_nonstream_audio_decoder_switch_to_subsong(dec, new_subsong);
-			GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(dec);
+			gst_nonstream_audio_decoder_switch_to_subsong(dec, new_subsong, NULL);
 
 			break;
 		}
@@ -845,16 +842,17 @@ static gboolean gst_nonstream_audio_decoder_src_event(GstPad *pad, GstObject *pa
 
 			gchar *uid = NULL;
 			guint subsong_idx = 0;
+			guint32 seqnum;
 
 			gst_event_parse_toc_select(event, &uid);
 
 			if ((uid != NULL) && (sscanf(uid, "nonstream-subsong-%05u", &subsong_idx) == 1))
 			{
-				GST_DEBUG_OBJECT(dec, "received TOC select event, switching to subsong %u", subsong_idx);
+				seqnum = gst_event_get_seqnum(event);
 
-				GST_NONSTREAM_AUDIO_DECODER_LOCK_MUTEX(dec);
-				gst_nonstream_audio_decoder_switch_to_subsong(dec, subsong_idx);
-				GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(dec);
+				GST_DEBUG_OBJECT(dec, "received TOC select event (sequence number %" G_GUINT32_FORMAT "), switching to subsong %u", seqnum, subsong_idx);
+
+				gst_nonstream_audio_decoder_switch_to_subsong(dec, subsong_idx, &seqnum);
 			}
 
 			g_free(uid);
@@ -1340,15 +1338,11 @@ static gboolean gst_nonstream_audio_decoder_stop_task(GstNonstreamAudioDecoder *
 }
 
 
-static gboolean gst_nonstream_audio_decoder_switch_to_subsong(GstNonstreamAudioDecoder *dec, guint new_subsong)
+static gboolean gst_nonstream_audio_decoder_switch_to_subsong(GstNonstreamAudioDecoder *dec, guint new_subsong, guint32 const *seqnum)
 {
-	/* must be called with lock */
-
 	gboolean ret = TRUE;
 	GstNonstreamAudioDecoderClass *klass = GST_NONSTREAM_AUDIO_DECODER_GET_CLASS(dec);
 
-	if (new_subsong == dec->current_subsong)
-		goto finish;
 
 	if (klass->set_current_subsong == NULL)
 	{
@@ -1363,15 +1357,105 @@ static gboolean gst_nonstream_audio_decoder_switch_to_subsong(GstNonstreamAudioD
 
 	if (dec->loaded_mode)
 	{
+		GstEvent *fevent;
 		GstClockTime new_position;
 		GstClockTime new_subsong_duration = GST_CLOCK_TIME_NONE;
 
+
+		/* Check if (a) new_subsong is already the current subsong
+		 * and (b) if new_subsong exceeds the number of available
+		 * subsongs. Do this here, when the song is loaded,
+		 * because prior to loading, the number of subsong is usually
+		 * not known (and the loading process might choose a specific
+		 * subsong to be the current one at the start of playback). */
+
+		GST_NONSTREAM_AUDIO_DECODER_LOCK_MUTEX(dec);
+
+		if (new_subsong == dec->current_subsong)
+		{
+			GST_DEBUG_OBJECT(dec, "subsong %u is already the current subsong - ignoring call", new_subsong);
+			goto finish_unlock;
+		}
+
+		if (klass->get_num_subsongs)
+		{
+			guint num_subsongs = klass->get_num_subsongs(dec);
+
+			if (new_subsong >= num_subsongs)
+			{
+				GST_WARNING_OBJECT(dec, "subsong %u is out of bounds (there are %u subsongs) - not switching", new_subsong, num_subsongs);
+				goto finish_unlock;
+			}
+		}
+
+		GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(dec);
+
+
+		/* Switching subsongs during playback is very similar to a
+		 * flushing seek. Therefore, the stream lock must be taken,
+		 * flush-start/flush-stop events have to be sent, and
+		 * the pad task has to be restarted. */
+
+
+		fevent = gst_event_new_flush_start();
+		if (seqnum != NULL)
+		{
+			gst_event_set_seqnum(fevent, *seqnum);
+			GST_DEBUG_OBJECT(dec, "sending flush start event with sequence number %" G_GUINT32_FORMAT, *seqnum);
+		}
+		else
+			GST_DEBUG_OBJECT(dec, "sending flush start event (no sequence number)");
+
+		gst_pad_push_event(dec->srcpad, gst_event_ref(fevent));
+	        /* unlock upstream pull_range */
+		if (klass->loads_from_sinkpad)
+		        gst_pad_push_event(dec->sinkpad, fevent);
+		else
+			gst_event_unref(fevent);
+
+
+		GST_PAD_STREAM_LOCK(dec->srcpad);
+
+
+		GST_NONSTREAM_AUDIO_DECODER_LOCK_MUTEX(dec);
+
+
 		if (!(klass->set_current_subsong(dec, new_subsong, &new_position)))
 		{
+			/* Switch failed. Do _not_ exit early from here - playback must
+			 * continue from the current subsong, and it cannot do that if
+			 * we exit here. Try getting the current position and proceed as
+			 * if the switch succeeded (but set the return value to FALSE.) */
+
 			ret = FALSE;
+			if (klass->tell)
+				new_position = klass->tell(dec);
+			else
+				new_position = 0;
 			GST_WARNING_OBJECT(dec, "switching to new subsong %u failed", new_subsong);
-			goto finish;
 		}
+
+		/* Flushing seek resets the base time, which means num_decoded_samples
+		 * needs to be set to 0, since it defines the segment.base value */
+		dec->num_decoded_samples = 0;
+
+
+		fevent = gst_event_new_flush_stop(TRUE);
+		if (seqnum != NULL)
+		{
+			gst_event_set_seqnum(fevent, *seqnum);
+			GST_DEBUG_OBJECT(dec, "sending flush stop event with sequence number %" G_GUINT32_FORMAT, *seqnum);
+		}
+		else
+			GST_DEBUG_OBJECT(dec, "sending flush stop event (no sequence number)");
+
+		gst_pad_push_event(dec->srcpad, gst_event_ref(fevent));
+	        /* unlock upstream pull_range */
+		if (klass->loads_from_sinkpad)
+		        gst_pad_push_event(dec->sinkpad, fevent);
+		else
+			gst_event_unref(fevent);
+
 
 		/* use the new subsong's duration (if one exists) */
 		if (klass->get_subsong_duration != NULL)
@@ -1390,14 +1474,43 @@ static gboolean gst_nonstream_audio_decoder_switch_to_subsong(GstNonstreamAudioD
 			if (subsong_tags != NULL)
 				gst_pad_push_event(dec->srcpad, gst_event_new_tag(subsong_tags));
 		}
+
+		GST_DEBUG_OBJECT(dec, "successfully switched to new subsong %u", new_subsong);
+		dec->current_subsong = new_subsong;
+
+
+		GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(dec);
+
+
+		/* Subsong has been switched, and all necessary events have been
+		 * pushed downstream. Restart srcpad task. */
+		gst_nonstream_audio_decoder_start_task(dec);
+
+		/* Unlock stream, we are done */
+		GST_PAD_STREAM_UNLOCK(dec->srcpad);
+	}
+	else
+	{
+		/* If song hasn't been loaded yet, then playback cannot currently
+		 * been happening. In this case, a "switch" is simple - just store
+		 * the current subsong index. When the song is loaded, it will
+		 * start playing this subsong. */
+
+		GST_DEBUG_OBJECT(dec, "playback hasn't started yet - storing subsong index %u as the current subsong", new_subsong);
+
+		GST_NONSTREAM_AUDIO_DECODER_LOCK_MUTEX(dec);
+		dec->current_subsong = new_subsong;
+		GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(dec);
 	}
 
-	/* store new subsong in case the property is set before the media got loaded */
-	GST_DEBUG_OBJECT(dec, "successfully switched to new subsong %u", new_subsong);
-	dec->current_subsong = new_subsong;
 
 finish:
 	return ret;
+
+
+finish_unlock:
+	GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(dec);
+	goto finish;
 }
 
 
