@@ -1437,8 +1437,7 @@ static void gst_nonstream_audio_decoder_update_toc(GstNonstreamAudioDecoder *dec
 		g_free(uid);
 	}
 
-	gst_pad_push_event(dec->srcpad, gst_event_new_toc(dec->toc, update));
-	gst_message_new_toc(GST_OBJECT(dec), dec->toc, update);
+	gst_pad_push_event(dec->srcpad, gst_event_new_toc(dec->toc, FALSE));
 }
 
 
