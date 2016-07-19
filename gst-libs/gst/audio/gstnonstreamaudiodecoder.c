@@ -948,6 +948,7 @@ static gboolean gst_nonstream_audio_decoder_src_query(GstPad *pad, GstObject *pa
 		{
 			gboolean b;
 			GstFormat fmt;
+			GstClockTime duration;
 
 			b = dec->loaded_mode;
 
@@ -965,10 +966,14 @@ static gboolean gst_nonstream_audio_decoder_src_query(GstPad *pad, GstObject *pa
 
 			gst_query_parse_seeking(query, &fmt, NULL, NULL, NULL);
 
+			GST_NONSTREAM_AUDIO_DECODER_LOCK_MUTEX(dec);
+			duration = dec->subsong_duration;
+			GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(dec);
+
 			if (fmt == GST_FORMAT_TIME)
 			{
 				GST_DEBUG_OBJECT(parent, "seeking query received with format TIME -> can seek: yes");
-				gst_query_set_seeking(query, fmt, TRUE, 0, -1);
+				gst_query_set_seeking(query, fmt, TRUE, 0, duration);
 				res = TRUE;
 			}
 			else
