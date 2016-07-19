@@ -1368,13 +1368,11 @@ static void gst_nonstream_audio_decoder_update_toc(GstNonstreamAudioDecoder *dec
 	/* must be called with lock */
 
 	guint num_subsongs, i;
-	gboolean update = FALSE;
 
 	if (dec->toc != NULL)
 	{
 		gst_toc_unref(dec->toc);
 		dec->toc = NULL;
-		update = TRUE;
 	}
 
 	if (klass->get_num_subsongs == NULL)
