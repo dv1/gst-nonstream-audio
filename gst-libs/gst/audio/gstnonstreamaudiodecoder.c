@@ -1389,6 +1389,13 @@ static void gst_nonstream_audio_decoder_update_toc(GstNonstreamAudioDecoder *dec
 
 	dec->toc = gst_toc_new(GST_TOC_SCOPE_GLOBAL);
 
+	if (klass->get_main_tags)
+	{
+		GstTagList *main_tags = klass->get_main_tags(dec);
+		if (main_tags)
+			gst_toc_set_tags(dec->toc, main_tags);
+	}
+
 	for (i = 0; i < num_subsongs; ++i)
 	{
 		gchar *uid;
@@ -1397,15 +1404,23 @@ static void gst_nonstream_audio_decoder_update_toc(GstNonstreamAudioDecoder *dec
 		GstTagList *tags;
 
 		duration = (klass->get_subsong_duration != NULL) ? klass->get_subsong_duration(dec, i) : GST_CLOCK_TIME_NONE;
-		tags = (klass->get_subsong_tags != NULL) ? klass->get_subsong_tags(dec, i) : (GstTagList*)NULL;
+		tags = (klass->get_subsong_tags != NULL) ? klass->get_subsong_tags(dec, i) : NULL;
+		if (!tags)
+			tags = gst_tag_list_new_empty();
 
-		uid = g_strdup_printf("%u", i);
-		entry = gst_toc_entry_new(GST_TOC_ENTRY_TYPE_TITLE, uid);
+		uid = g_strdup_printf("nonstream-subsong-%05u", i);
+		entry = gst_toc_entry_new(GST_TOC_ENTRY_TYPE_TRACK, uid);
+		/* Set the UID as title tag for TOC entry if no title already present */
+		gst_tag_list_add(tags, GST_TAG_MERGE_KEEP, GST_TAG_TITLE, uid, NULL);
+		/* Set the subsong duration as duration tag for TOC entry if no duration already present */
+		if (duration != GST_CLOCK_TIME_NONE)
+			gst_tag_list_add(tags, GST_TAG_MERGE_KEEP, GST_TAG_DURATION, duration, NULL);
 
 		/* FIXME: TOC does not allow GST_CLOCK_TIME_NONE as a stop value */
 		if (duration == GST_CLOCK_TIME_NONE)
 			duration = G_MAXINT64;
 
+		/* Subsongs always start at 00:00 */
 		gst_toc_entry_set_start_stop_times(entry, 0, duration);
 		gst_toc_entry_set_tags(entry, tags);
 
