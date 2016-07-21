@@ -15,7 +15,7 @@ def build(bld):
 	if not bld.env['OPENMPT_ENABLED']:
 		return
 	bld(
-		features = ['cxx', 'cxxshlib'],
+		features = ['c', 'cshlib'],
 		includes = ['../..', '../../gst-libs', '.'],
 		uselib = 'GSTREAMER GSTREAMER_BASE GSTREAMER_AUDIO OPENMPT',
 		use = 'gstnonstreamaudio',
