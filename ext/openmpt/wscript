@@ -20,7 +20,8 @@ def build(bld):
 		uselib = 'GSTREAMER GSTREAMER_BASE GSTREAMER_AUDIO OPENMPT',
 		use = 'gstnonstreamaudio',
 		target = 'gstopenmpt',
-		source = 'gstopenmptdec.c',
+		source = ['gstopenmptdec.c', 'plugin.c'],
+		defines = ['HAVE_CONFIG_H'],
 		install_path = bld.env['PLUGIN_INSTALL_PATH']
 	)
 

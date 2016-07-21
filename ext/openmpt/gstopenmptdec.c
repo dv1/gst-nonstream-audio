@@ -785,30 +785,3 @@ static gboolean gst_openmpt_dec_decode(GstNonstreamAudioDecoder *dec, GstBuffer 
 
 	return TRUE;
 }
-
-
-
-G_BEGIN_DECLS
-
-
-static gboolean plugin_init(GstPlugin *plugin)
-{
-	if (!gst_element_register(plugin, "openmptdec", GST_RANK_PRIMARY + 2, gst_openmpt_dec_get_type())) return FALSE;
-	return TRUE;
-}
-
-GST_PLUGIN_DEFINE(
-	GST_VERSION_MAJOR,
-	GST_VERSION_MINOR,
-	openmptdec,
-	"OpenMPT module player",
-	plugin_init,
-	"1.0",
-	"LGPL",
-	"package",
-	"http://no-url-yet"
-)
-
-
-G_END_DECLS
-
