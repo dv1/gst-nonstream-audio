@@ -72,6 +72,8 @@
  * example, if a subsong is 2 minutes long, steady playback is at 5 minutes
  * (because infinite looping is enabled), then seeking will still place the
  * position within the 2 minute period.
+ * Loop count 0 means no looping. Loop count -1 means infinite looping.
+ * Nonzero positive values indicate how often a loop shall occur.
  *
  * If the initial subsong and loop count are set to values the subclass does
  * not support, the subclass has a chance to correct these values.
@@ -1574,6 +1576,10 @@ static void gst_nonstream_audio_decoder_update_toc(GstNonstreamAudioDecoder *dec
 		/* Subsongs always start at 00:00 */
 		gst_toc_entry_set_start_stop_times(entry, 0, duration);
 		gst_toc_entry_set_tags(entry, tags);
+
+		/* NOTE: *not* adding loop count via gst_toc_entry_set_loop(), since
+		 * in GstNonstreamAudioDecoder, looping is a playback property, not
+		 * a property of the subsongs themselves */
 
 		GST_DEBUG_OBJECT(
 			dec,
