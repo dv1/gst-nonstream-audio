@@ -1249,6 +1249,11 @@ static gboolean gst_nonstream_audio_decoder_finish_load(GstNonstreamAudioDecoder
 	}
 
 
+	/* Log the number of available subsongs */
+	if (klass->get_num_subsongs != NULL)
+		GST_DEBUG_OBJECT(dec, "%u subsong(s) available", klass->get_num_subsongs(dec));
+
+
 	/* Set the current subsong (or use the default value) */
 	if (klass->get_current_subsong != NULL)
 	{
@@ -1536,8 +1541,6 @@ static void gst_nonstream_audio_decoder_update_toc(GstNonstreamAudioDecoder *dec
 		return;
 
 	num_subsongs = klass->get_num_subsongs(dec);
-	GST_DEBUG_OBJECT(dec, "%u subsong(s) available", num_subsongs);
-
 	if (num_subsongs <= 1)
 	{
 		GST_DEBUG_OBJECT(dec, "no need for a TOC since there is only one subsong");
