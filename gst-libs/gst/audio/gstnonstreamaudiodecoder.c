@@ -18,16 +18,10 @@
  */
 
 
-#include <stdio.h>
-#include <gst/gst.h>
-#include <gst/audio/audio.h>
-
-#include "gstnonstreamaudiodecoder.h"
-
-
 /**
  * SECTION:gstnonstreamaudiodecoder
  * @short_description: Base class for decoding of non-streaming audio
+ * @see_also: #GstAudioDecoder
  *
  * This base class is for decoders which do not operate on a streaming model.
  * That is: they load the encoded media at once, as part of an initialization,
@@ -102,8 +96,8 @@
  *       fails, an error is reported, and the pipeline stops.
  *     </para></listitem>
  *     <listitem><para>
- *       If there are no errors, @load_from_buffer is called to load the media.
- *       The subclass must at least call @gst_nonstream_audio_decoder_set_output_audioinfo
+ *       If there are no errors, @load_from_buffer is called to load the media. The
+ *       subclass must at least call gst_nonstream_audio_decoder_set_output_audioinfo()
  *       there, and is free to make use of the initial subsong, output mode, and
  *       position. If the actual output mode or position differs from the initial
  *       value,it must set the initial value to the actual one (for example, if
@@ -126,15 +120,15 @@
  *     </para></listitem>
  *     <listitem><para>
  *       Upon reaching a loop end, subclass either ignores that, or loops back
- *       to the beginning of the loop. In the latter case, if the output mode is
- *       set to LOOPING, the subclass must call @gst_nonstream_audio_decoder_handle_loop
+ *       to the beginning of the loop. In the latter case, if the output mode is set
+ *       to LOOPING, the subclass must call gst_nonstream_audio_decoder_handle_loop()
  *       *after* the playback position moved to the start of the loop. In
  *       STEADY mode, the subclass must *not* call this function.
  *       Since many decoders only provide a callback for when the looping occurs,
  *       and that looping occurs inside the decoding operation itself, the following
  *       mechanism for subclass is suggested: set a flag inside such a callback.
  *       Then, in the next @decode call, before doing the decoding, check this flag.
- *       If it is set, @gst_nonstream_audio_decoder_handle_loop is called, and the
+ *       If it is set, gst_nonstream_audio_decoder_handle_loop() is called, and the
  *       flag is cleared.
  *       (This function call is necessary in LOOPING mode because it updates the
  *       current segment and makes sure the next buffer that is sent downstream
@@ -185,6 +179,16 @@
  * </para></listitem>
  * </itemizedlist>
  */
+
+#ifdef HAVE_CONFIG_H
+#include "config.h"
+#endif
+
+#include <stdio.h>
+#include <gst/gst.h>
+#include <gst/audio/audio.h>
+
+#include "gstnonstreamaudiodecoder.h"
 
 
 GST_DEBUG_CATEGORY (nonstream_audiodecoder_debug);
@@ -1993,10 +1997,35 @@ static char const * get_seek_type_name(GstSeekType seek_type)
 
 
 
+/**
+ * gst_nonstream_audio_decoder_handle_loop:
+ * @dec: a #GstNonstreamAudioDecoder
+ * @new_position New position the next loop starts with
+ *
+ * Reports that a loop has been completed and creates a new appropriate
+ * segment for the next loop.
+ *
+ * @new_position exists because a loop may not start at the beginning.
+ *
+ * This function is only useful for subclasses which can be in the
+ * GST_NONSTREM_AUDIO_OUTPUT_MODE_LOOPING output mode, since in the
+ * GST_NONSTREM_AUDIO_OUTPUT_MODE_STEADY output mode, this function
+ * does nothing. See #GstNonstreamAudioOutputMode for more details.
+ *
+ * The subclass calls this during playback when it loops. It produces
+ * a new segment with updated base time and internal time values, to allow
+ * for seamless looping. It does *not* check the number of elapsed loops;
+ * this is up the subclass.
+ *
+ * Note that if this function is called, then it must be done after the
+ * last samples of the loop have been decoded and pushed downstream.
+ *
+ * This function must be called with the decoder mutex lock held, since it
+ * is typically called from within @decode (which in turn are called with
+ * the lock already held).
+ */
 void gst_nonstream_audio_decoder_handle_loop(GstNonstreamAudioDecoder *dec, GstClockTime new_position)
 {
-	/* NOTE: handle_loop must be called AFTER the last samples of the loop have been decoded and pushed downstream */
-
 	if (dec->output_mode == GST_NONSTREM_AUDIO_OUTPUT_MODE_STEADY)
 	{
 		/* handle_loop makes no sense with open-ended decoders */
@@ -2012,15 +2041,25 @@ void gst_nonstream_audio_decoder_handle_loop(GstNonstreamAudioDecoder *dec, GstC
 }
 
 
-
+/**
+ * gst_nonstream_audio_decoder_set_output_format:
+ * @dec: a #GstNonstreamAudioDecoder
+ * @audio_info: Valid audio info structure containing the output format
+ *
+ * Sets the output caps by means of a GstAudioInfo structure.
+ *
+ * This must be called latest in the first @decode call, to ensure src caps are
+ * set before decoded samples are sent downstream. Typically, this is called
+ * from inside @load_from_buffer or @load_from_custom.
+ *
+ * This function must be called with the decoder mutex lock held, since it
+ * is typically called from within the aforementioned vfuncs (which in turn
+ * are called with the lock already held).
+ *
+ * Returns: TRUE if setting the output format succeeded, FALSE otherwise
+ */
 gboolean gst_nonstream_audio_decoder_set_output_format(GstNonstreamAudioDecoder *dec, GstAudioInfo const *audio_info)
 {
-	/* may only be called from within load_from_buffer(), load_from_custom(), and decode()
-	 * does NOT acquire lock, to avoid deadlocks when called in the functions mentioned above
-	 * (which already lock the mutex)
-	 * calling this anywhere else might cause race conditions related to the audio info */
-
-
 	GstCaps *caps;
 	GstCaps *templ_caps;
 	gboolean caps_ok;
@@ -2063,6 +2102,20 @@ gboolean gst_nonstream_audio_decoder_set_output_format(GstNonstreamAudioDecoder 
 }
 
 
+/**
+ * gst_nonstream_audio_decoder_set_output_format_simple:
+ * @dec: a #GstNonstreamAudioDecoder
+ * @sample_rate: Output sample rate to use, in Hz
+ * @sample_format: Output sample format to use
+ * @num_channels: Number of output channels to use
+ *
+ * Convenience function; sets the output caps by means of common parameters.
+ *
+ * Internally, this fills a GstAudioInfo structure and calls
+ * gst_nonstream_audio_decoder_set_output_format().
+ *
+ * Returns: TRUE if setting the output format succeeded, FALSE otherwise
+ */
 gboolean gst_nonstream_audio_decoder_set_output_format_simple(GstNonstreamAudioDecoder *dec, guint sample_rate, GstAudioFormat sample_format, guint num_channels)
 {
 	GstAudioInfo output_audio_info;
@@ -2081,6 +2134,36 @@ gboolean gst_nonstream_audio_decoder_set_output_format_simple(GstNonstreamAudioD
 }
 
 
+/**
+ * gst_nonstream_audio_decoder_get_downstream_info:
+ * @dec: a #GstNonstreamAudioDecoder
+ * @format: #GstAudioFormat value to fill with a sample format
+ * @sample_rate: Integer to fill with a sample rate
+ * @num_channels: Integer to fill with a channel count
+ *
+ * Gets sample format, sample rate, channel count from the allowed srcpad caps.
+ *
+ * This is useful for when the subclass wishes to adjust one or more output
+ * parameters to whatever downstream is supporting. For example, the output
+ * sample rate is often a freely adjustable value in module players.
+ *
+ * This function tries to find a value inside the srcpad peer's caps for
+ * @format, @sample_rate, @num_chnanels . Any of these can be NULL; they
+ * (and the corresponding downstream caps) are then skipped while retrieving
+ * information. Non-fixated caps are fixated first; the value closest to
+ * their present value is then chosen. For example, if the variables pointed
+ * to by the arguments are GST_AUDIO_FORMAT_16, 48000 Hz, and 2 channels,
+ * and the downstream caps are:
+ *
+ * "audio/x-raw, format={S16LE,S32LE}, rate=[1,32000], channels=[1,MAX]"
+ *
+ * Then @format and @channels stay the same, while @rate is set to 32000 Hz.
+ * This way, the initial values the the variables pointed to by the arguments
+ * are set to can be used as default output values.
+ *
+ * Decoder lock is not held by this function, so it can be called from within
+ * any of the class vfuncs.
+ */
 void gst_nonstream_audio_decoder_get_downstream_info(GstNonstreamAudioDecoder *dec, GstAudioFormat *format, gint *sample_rate, gint *num_channels)
 {
 	GstCaps *allowed_srccaps;
@@ -2191,13 +2274,20 @@ void gst_nonstream_audio_decoder_get_downstream_info(GstNonstreamAudioDecoder *d
 }
 
 
+/**
+ * gst_nonstream_audio_decoder_allocate_output_buffer:
+ * @dec: Decoder instance
+ * @size: Size of the output buffer, in bytes
+ *
+ * Allocates an output buffer with the internally configured buffer pool.
+ *
+ * This function may only be called from within @load_from_buffer,
+ * @load_from_custom, and @decode.
+ *
+ * Returns: Newly allocated output buffer, or NULL if allocation failed
+ */
 GstBuffer* gst_nonstream_audio_decoder_allocate_output_buffer(GstNonstreamAudioDecoder *dec, gsize size)
 {
-	/* may only be called from within load_from_buffer(), load_from_custom(), and decode()
-	 * does NOT acquire lock, to avoid deadlocks when called in the functions mentioned above
-	 * (which already lock the mutex)
-	 * calling this anywhere else might cause race conditions related to the allocator */
-
 	if (G_UNLIKELY(
 		dec->output_format_changed ||
 		(GST_AUDIO_INFO_IS_VALID(&(dec->output_audio_info)) && gst_pad_check_reconfigure(dec->srcpad))
