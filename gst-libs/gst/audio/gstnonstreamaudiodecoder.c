@@ -1081,6 +1081,8 @@ static gboolean gst_nonstream_audio_decoder_negotiate_default(GstNonstreamAudioD
 	GST_DEBUG_OBJECT(dec, "setting src caps %" GST_PTR_FORMAT, (gpointer)caps);
 
 	res = gst_pad_push_event(dec->srcpad, gst_event_new_caps(caps));
+	/* clear any pending reconfigure flag */
+	gst_pad_check_reconfigure(dec->srcpad);
 
 	if (!res)
 	{
