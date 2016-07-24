@@ -1932,8 +1932,6 @@ static void gst_nonstream_audio_decoder_output_task(GstNonstreamAudioDecoder *de
 	dec->cur_pos_in_samples += num_samples;
 	dec->num_decoded_samples += num_samples;
 
-	GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(dec);
-
 	/* the decode() call might have set a new output format -> renegotiate
 	 * before sending the new buffer downstream */
 	if (G_UNLIKELY(
@@ -1945,9 +1943,11 @@ static void gst_nonstream_audio_decoder_output_task(GstNonstreamAudioDecoder *de
 		{
 			gst_buffer_unref(outbuf);
 			GST_LOG_OBJECT(dec, "could not push output buffer: negotiation failed");
-			goto pause;
+			goto pause_unlock;
 		}
 	}
+
+	GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(dec);
 
 	/* push new samples downstream
 	 * no need to unref buffer - gst_pad_push() does it in
