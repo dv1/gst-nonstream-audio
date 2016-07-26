@@ -1283,9 +1283,11 @@ static gboolean gst_nonstream_audio_decoder_finish_load(GstNonstreamAudioDecoder
 	}
 
 
-	/* Send subsong tags downstream (if tags are present) */
+	/* Send tags downstream (if some exist) */
 	if (klass->get_subsong_tags != NULL)
 	{
+		/* Subsong tags available */
+
 		GstTagList *tags;
 		GST_TRACE_OBJECT(dec, "requesting subsong tags");
 		tags = klass->get_subsong_tags(dec, dec->current_subsong);
@@ -1293,6 +1295,14 @@ static gboolean gst_nonstream_audio_decoder_finish_load(GstNonstreamAudioDecoder
 			tags = gst_nonstream_audio_decoder_add_main_tags(dec, tags);
 		if (tags != NULL)
 			gst_pad_push_event(dec->srcpad, gst_event_new_tag(tags));
+	}
+	else
+	{
+		/* No subsong tags - just send main tags out */
+
+		GstTagList *tags = gst_tag_list_new_empty();
+		tags = gst_nonstream_audio_decoder_add_main_tags(dec, tags);
+		gst_pad_push_event(dec->srcpad, gst_event_new_tag(tags));
 	}
 
 
@@ -1620,14 +1630,6 @@ static void gst_nonstream_audio_decoder_update_subsong_duration(GstNonstreamAudi
 {
 	/* must be called with lock */
 
-	GstTagList *tags;
-
-	tags = gst_tag_list_new_empty();
-	gst_tag_list_add(tags, GST_TAG_MERGE_REPLACE, GST_TAG_DURATION, duration, NULL);
-	tags = gst_nonstream_audio_decoder_add_main_tags(dec, tags);
-	if (tags)
-		gst_pad_push_event(dec->srcpad, gst_event_new_tag(tags));
-
 	dec->subsong_duration = duration;
 	GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(dec);
 	gst_element_post_message(GST_ELEMENT(dec), gst_message_new_duration_changed(GST_OBJECT(dec)));
@@ -1870,14 +1872,22 @@ static GstTagList * gst_nonstream_audio_decoder_add_main_tags(GstNonstreamAudioD
 	tags = gst_tag_list_make_writable(tags);
 	if (tags)
 	{
+		GstClockTime duration;
+		GstTagList *main_tags;
+
 		/* Get main tags. If some exist, merge them with the given tags,
 		 * and return the merged result. Otherwise, just return the given tags. */
-		GstTagList *main_tags = klass->get_main_tags(dec);
+		main_tags = klass->get_main_tags(dec);
 		if (main_tags)
 		{
 			tags = gst_tag_list_merge(main_tags, tags, GST_TAG_MERGE_REPLACE);
 			gst_tag_list_unref(main_tags);
 		}
+
+		/* Add subsong duration if available */
+		duration = dec->subsong_duration;
+		if (GST_CLOCK_TIME_IS_VALID(duration))
+			gst_tag_list_add(tags, GST_TAG_MERGE_REPLACE, GST_TAG_DURATION, duration, NULL);
 
 		return tags;
 	}
