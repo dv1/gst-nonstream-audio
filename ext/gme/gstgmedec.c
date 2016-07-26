@@ -603,7 +603,7 @@ static gboolean plugin_init(GstPlugin *plugin)
 GST_PLUGIN_DEFINE(
 	GST_VERSION_MAJOR,
 	GST_VERSION_MINOR,
-	gmedec,
+	gme,
 	"video game music module player",
 	plugin_init,
 	"1.0",

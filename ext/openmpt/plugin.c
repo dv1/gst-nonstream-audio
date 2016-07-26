@@ -17,7 +17,7 @@ static gboolean plugin_init(GstPlugin *plugin)
 GST_PLUGIN_DEFINE(
 	GST_VERSION_MAJOR,
 	GST_VERSION_MINOR,
-	openmptdec,
+	openmpt,
 	"OpenMPT module player",
 	plugin_init,
 	VERSION,

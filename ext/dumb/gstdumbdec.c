@@ -981,7 +981,7 @@ static gboolean plugin_init(GstPlugin *plugin)
 GST_PLUGIN_DEFINE(
 	GST_VERSION_MAJOR,
 	GST_VERSION_MINOR,
-	dumbdec,
+	dumb,
 	"DUMB (Dynamic Universal Music Bibliotheque) module player",
 	plugin_init,
 	"1.0",
