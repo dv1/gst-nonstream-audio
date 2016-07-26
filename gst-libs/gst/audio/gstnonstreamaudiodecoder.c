@@ -1187,14 +1187,15 @@ static gboolean gst_nonstream_audio_decoder_get_upstream_size(GstNonstreamAudioD
 
 static gboolean gst_nonstream_audio_decoder_load_from_buffer(GstNonstreamAudioDecoder *dec, GstBuffer *buffer)
 {
-	/* must be called with lock */
-
 	gboolean load_ok;
 	GstClockTime initial_position;
 	GstNonstreamAudioDecoderClass *klass;
+	gboolean ret;
 
 	klass = GST_NONSTREAM_AUDIO_DECODER_CLASS(G_OBJECT_GET_CLASS(dec));
 	g_assert(klass->load_from_buffer != NULL);
+
+	GST_NONSTREAM_AUDIO_DECODER_LOCK_MUTEX(dec);
 
 	GST_LOG_OBJECT(dec, "read %" G_GSIZE_FORMAT " bytes from upstream", gst_buffer_get_size(buffer));
 
@@ -1202,28 +1203,36 @@ static gboolean gst_nonstream_audio_decoder_load_from_buffer(GstNonstreamAudioDe
 	load_ok = klass->load_from_buffer(dec, buffer, dec->current_subsong, &initial_position, &(dec->output_mode), &(dec->num_loops));
 	gst_buffer_unref(buffer);
 
-	return gst_nonstream_audio_decoder_finish_load(dec, load_ok, initial_position, FALSE);
+	ret = gst_nonstream_audio_decoder_finish_load(dec, load_ok, initial_position, FALSE);
+
+	GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(dec);
+
+	return ret;
 }
 
 
 static gboolean gst_nonstream_audio_decoder_load_from_custom(GstNonstreamAudioDecoder *dec)
 {
-	/* must be called with lock */
-
 	gboolean load_ok;
 	GstClockTime initial_position;
 	GstNonstreamAudioDecoderClass *klass;
+	gboolean ret;
 
 	klass = GST_NONSTREAM_AUDIO_DECODER_CLASS(G_OBJECT_GET_CLASS(dec));
 	g_assert(klass->load_from_custom != NULL);
+
+	GST_NONSTREAM_AUDIO_DECODER_LOCK_MUTEX(dec);
 
 	GST_LOG_OBJECT(dec, "reading song from custom source defined by derived class");
 
 	initial_position = 0;
 	load_ok = klass->load_from_custom(dec, dec->current_subsong, &initial_position, &(dec->output_mode), &(dec->num_loops));
 
-	return gst_nonstream_audio_decoder_finish_load(dec, load_ok, initial_position, TRUE);
+	ret = gst_nonstream_audio_decoder_finish_load(dec, load_ok, initial_position, TRUE);
 
+	GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(dec);
+
+	return ret;
 }
 
 
