@@ -518,7 +518,9 @@ static gboolean gst_openmpt_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, 
 		openmpt_dec->subsong_durations = g_try_malloc(openmpt_dec->num_subsongs * sizeof(double));
 		if (openmpt_dec->subsong_durations == NULL)
 		{
+			GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(dec);
 			GST_ELEMENT_ERROR(openmpt_dec, RESOURCE, NO_SPACE_LEFT, ("could not allocate memory for subsong duration array"), (NULL));
+			GST_NONSTREAM_AUDIO_DECODER_LOCK_MUTEX(dec);
 			return FALSE;
 		}
 

@@ -363,7 +363,9 @@ static gboolean gst_dumb_dec_seek(GstNonstreamAudioDecoder *dec, GstClockTime *n
 
 	if (!gst_dumb_dec_init_sigrenderer_at_pos(GST_DUMB_DEC(dec), pos))
 	{
+		GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(dec);
 		GST_ELEMENT_ERROR(dec, STREAM, DECODE, (NULL), ("cannot reinitialize DUMB decoding"));
+		GST_NONSTREAM_AUDIO_DECODER_LOCK_MUTEX(dec);
 		return FALSE;
 	}
 	else
@@ -469,7 +471,9 @@ static gboolean gst_dumb_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, Gst
 
 		if (dumb_dec->duh == NULL)
 		{
+			GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(dec);
 			GST_ELEMENT_ERROR(dumb_dec, STREAM, DECODE, (NULL), ("DUMB failed to read module data"));
+			GST_NONSTREAM_AUDIO_DECODER_LOCK_MUTEX(dec);
 			return FALSE;
 		}
 	}
@@ -527,7 +531,9 @@ static gboolean gst_dumb_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, Gst
 
 	if (!ret)
 	{
+		GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(dec);
 		GST_ELEMENT_ERROR(dumb_dec, STREAM, DECODE, (NULL), ("cannot initialize DUMB decoding"));
+		GST_NONSTREAM_AUDIO_DECODER_LOCK_MUTEX(dec);
 		return FALSE;
 	}
 

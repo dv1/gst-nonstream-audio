@@ -1629,8 +1629,9 @@ static void gst_nonstream_audio_decoder_update_subsong_duration(GstNonstreamAudi
 		gst_pad_push_event(dec->srcpad, gst_event_new_tag(tags));
 
 	dec->subsong_duration = duration;
-
+	GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(dec);
 	gst_element_post_message(GST_ELEMENT(dec), gst_message_new_duration_changed(GST_OBJECT(dec)));
+	GST_NONSTREAM_AUDIO_DECODER_LOCK_MUTEX(dec);
 }
 
 
