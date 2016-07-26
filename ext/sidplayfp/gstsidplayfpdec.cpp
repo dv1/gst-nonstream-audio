@@ -849,7 +849,7 @@ static gint gst_sidplayfp_dec_get_num_loops(GstNonstreamAudioDecoder *dec)
 }
 
 
-static guint gst_sidplayfp_dec_get_supported_output_modes(GstNonstreamAudioDecoder *)
+static guint gst_sidplayfp_dec_get_supported_output_modes(G_GNUC_UNUSED GstNonstreamAudioDecoder *)
 {
 	return 1u << GST_NONSTREM_AUDIO_OUTPUT_MODE_STEADY;
 }

@@ -20,8 +20,8 @@ extern "C" {
 GST_PLUGIN_DEFINE(
 	GST_VERSION_MAJOR,
 	GST_VERSION_MINOR,
-	sidplayfpdec,
-	"C64 SID music player",
+	sidplayfp,
+	"C64 SID music playback plugin",
 	plugin_init,
 	VERSION,
 	"LGPL",
