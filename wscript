@@ -36,7 +36,7 @@ def add_compiler_flags(conf, env, flags, lang, compiler, uselib = ''):
 
 
 
-plugins = {'dumb' : True, 'gme' : True, 'openmpt' : True, 'uade' : False, 'gzip' : True}
+plugins = {'dumb' : True, 'gme' : True, 'openmpt' : True, 'uade' : False, 'sidplayfp' : True, 'gzip' : True}
 
 
 
@@ -75,7 +75,7 @@ def configure(conf):
 	elif conf.env['LINKFLAGS']:
 		check_compiler_flags_2(conf, '', conf.env['LINKFLAGS'], "Testing linker flags %s" % ' '.join(conf.env['LINKFLAGS']))
 	c_compiler_flags = ['-Wextra', '-Wall', '-std=gnu99', '-pedantic', '-fPIC', '-DPIC']
-	cxx_compiler_flags = ['-Wextra', '-Wall',  '-pedantic', '-fPIC', '-DPIC']
+	cxx_compiler_flags = ['-Wextra', '-Wall',  '-pedantic', '-fPIC', '-DPIC', '-Wno-variadic-macros', '-Wno-long-long']
 	common_compiler_flags = []
 	if conf.options.enable_debug:
 		common_compiler_flags = ['-O0', '-g3', '-ggdb']

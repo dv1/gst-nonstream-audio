@@ -1,0 +1,27 @@
+#!/usr/bin/env python
+
+from waflib import Logs
+
+
+def configure(conf):
+	if conf.check_cfg(package = 'libsidplayfp', uselib_store = 'SIDPLAYFP', args = '--cflags --libs', mandatory = 0):
+		conf.env['SIDPLAYFP_ENABLED'] = 1
+		conf.env['ENABLED_PLUGINS'] += ['sidplayfp']
+	else:
+		conf.env['DISABLED_PLUGINS']['sidplayfp'] = 'could not find libsidplayfp'
+
+
+def build(bld):
+	if not bld.env['SIDPLAYFP_ENABLED']:
+		return
+	bld(
+		features = ['c', 'cxx', 'cxxshlib'],
+		includes = ['../..', '../../gst-libs', '.'],
+		uselib = 'GSTREAMER GSTREAMER_BASE GSTREAMER_AUDIO SIDPLAYFP',
+		use = 'gstnonstreamaudio',
+		target = 'gstsidplayfp',
+		source = ['gstsidplayfpdec.cpp', 'plugin.cpp'],
+		defines = ['HAVE_CONFIG_H'],
+		install_path = bld.env['PLUGIN_INSTALL_PATH']
+	)
+
