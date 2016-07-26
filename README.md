@@ -25,17 +25,20 @@ which cause playback to go back to the beginning, or playback loops in a subset 
 Available plugins
 -----------------
 
-* dumbdec : module music decoder using the DUMB (Dynamic Universal Music Bibliotheque) library.
+* dumb : module music decoder using the DUMB (Dynamic Universal Music Bibliotheque) library.
   Instead of the [original](http://dumb.sf.net/), which has been abandoned since 2005, the plugin
   uses kode54's [improved version](https://github.com/kode54/dumb). Note that the plugin will
   not work correctly with the original; however, this codebase contains the improved version as a
   git submodule.
-* gmedec : video game music decoder using the Game Music Emulator library. As with DUMB, an
+* gme : video game music decoder using the Game Music Emulator library. As with DUMB, an
   improved fork is used.
 * openmpt : module music decoder using libopenmpt, a library version of [OpenMPT](http://openmpt.org/).
   libopenmpt is part of an extensive OpenMPT refactoring, and thus has an unstable API at the moment.
   It works fine, but may not build with coming libopenmpt versions due to the unstable API. For this
   reason, it is disabled by default (use `--enable-openmpt` with `./waf configure` below).
+* wildmidi: MIDI music decoder using the [WildMidi software synthesizer](https://www.mindwerks.net/projects/wildmidi/).
+* sidplayfp: SID music decoder using the [sidplayfp library](https://sourceforge.net/p/sidplay-residfp/wiki/Home/).
+* uade: Amiga music decoder using [UADE](http://zakalwe.fi/uade/).
 
 
 How to build
