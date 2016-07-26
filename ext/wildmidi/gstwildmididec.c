@@ -39,6 +39,17 @@
 #endif
 
 #include <gst/gst.h>
+#include <glib/gstdio.h>
+
+#ifdef G_OS_WIN32
+
+#ifndef R_OK
+#define R_OK 4 /* Test for read permission */
+#endif
+
+#else
+#include <unistd.h>
+#endif
 
 #include "gstwildmididec.h"
 
@@ -52,6 +63,10 @@ GST_DEBUG_CATEGORY_STATIC(wildmididec_debug);
 #define WILDMIDI_SAMPLE_RATE 44100
 /* WildMidi always outputs stereo data */
 #define WILDMIDI_NUM_CHANNELS 2
+
+#ifndef WILDMIDI_CFG
+#define WILDMIDI_CFG "/etc/timidity.cfg"
+#endif
 
 #define DEFAULT_LOG_VOLUME_SCALE     TRUE
 #define DEFAULT_ENHANCED_RESAMPLING  TRUE
@@ -125,6 +140,90 @@ static unsigned long init_refcount = 0;
 static volatile gint wildmidi_initialized = 0;
 
 
+static gchar* gst_wildmidi_get_config_path(void)
+{
+	/* This code is adapted from the original wildmidi
+	 * gst-plugins-bad decoder element */
+
+	gchar *path = g_strdup(g_getenv("WILDMIDI_CFG"));
+
+	GST_DEBUG("trying configuration path \"%s\" from WILDMIDI_CFG environment variable", GST_STR_NULL(path));
+	if (path && (g_access(path, R_OK) == -1))
+	{
+		g_free(path);
+		path = NULL;
+	}
+
+	if (path == NULL)
+	{
+		path = g_build_path(G_DIR_SEPARATOR_S, g_get_home_dir(), ".wildmidirc", NULL);
+		GST_DEBUG("trying configuration path \"%s\"", path);
+		if (path && (g_access(path, R_OK) == -1))
+		{
+			g_free(path);
+			path = NULL;
+		}
+	}
+
+	if (path == NULL)
+	{
+		path = g_build_path(G_DIR_SEPARATOR_S, G_DIR_SEPARATOR_S "etc", "wildmidi.cfg", NULL);
+		GST_DEBUG("trying configuration path \"%s\"", path);
+		if (path && (g_access(path, R_OK) == -1))
+		{
+			g_free(path);
+			path = NULL;
+		}
+	}
+
+	if (path == NULL)
+	{
+		path = g_build_path(G_DIR_SEPARATOR_S, G_DIR_SEPARATOR_S "etc", "wildmidi", "wildmidi.cfg", NULL);
+		GST_DEBUG("trying configuration path \"%s\"", path);
+		if (path && (g_access(path, R_OK) == -1))
+		{
+			g_free(path);
+			path = NULL;
+		}
+	}
+
+	if (path == NULL)
+	{
+		path = g_strdup(WILDMIDI_CFG);
+		GST_DEBUG("trying default configuration path \"%s\"", path);
+		if (path && (g_access(path, R_OK) == -1))
+		{
+			g_free(path);
+			path = NULL;
+		}
+	}
+
+	if (path == NULL)
+	{
+		path = g_build_path(G_DIR_SEPARATOR_S, G_DIR_SEPARATOR_S "etc", "timidity.cfg", NULL);
+		GST_DEBUG("trying TiMidity configuration path \"%s\"", path);
+		if (path && (g_access(path, R_OK) == -1))
+		{
+			g_free(path);
+			path = NULL;
+		}
+	}
+
+	if (path == NULL)
+	{
+		path = g_build_path(G_DIR_SEPARATOR_S, G_DIR_SEPARATOR_S "etc", "timidity", "timidity.cfg", NULL);
+		GST_DEBUG("trying TiMidity configuration path \"%s\"", path);
+		if (path && (g_access(path, R_OK) == -1))
+		{
+			g_free(path);
+			path = NULL;
+		}
+	}
+
+	return path;
+}
+
+
 static void gst_wildmidi_init_library(void)
 {
 	GST_DEBUG("WildMidi init instance counter: %lu", init_refcount);
@@ -137,16 +236,27 @@ static void gst_wildmidi_init_library(void)
 	}
 	else
 	{
-		int ret = WildMidi_Init("/etc/wildmidi/wildmidi.cfg", WILDMIDI_SAMPLE_RATE, 0);
-		if (ret == 0)
+		gchar *config_path = gst_wildmidi_get_config_path();
+		if (config_path != NULL)
 		{
-			GST_DEBUG("WildMidi initialized, version string: %s", WildMidi_GetString(WM_GS_VERSION));
-			++init_refcount;
-			g_atomic_int_set(&wildmidi_initialized, 1);
+			int ret = WildMidi_Init(config_path, WILDMIDI_SAMPLE_RATE, 0);
+			g_free(config_path);
+
+			if (ret == 0)
+			{
+				GST_DEBUG("WildMidi initialized, version string: %s", WildMidi_GetString(WM_GS_VERSION));
+				++init_refcount;
+				g_atomic_int_set(&wildmidi_initialized, 1);
+			}
+			else
+			{
+				GST_ERROR("initializing WildMidi failed");
+				g_atomic_int_set(&wildmidi_initialized, 0);
+			}
 		}
 		else
 		{
-			GST_ERROR("initializing WildMidi failed");
+			GST_ERROR("no config file, can't initialise");
 			g_atomic_int_set(&wildmidi_initialized, 0);
 		}
 	}
