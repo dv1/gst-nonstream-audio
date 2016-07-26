@@ -1,5 +1,8 @@
+#ifdef HAVE_CONFIG_H
+ #include <config.h>
+#endif
+
 #include <string.h>
-#include <config.h>
 #include <gst/gst.h>
 #include <gst/base/gstadapter.h>
 #include <gst/base/gsttypefindhelper.h>

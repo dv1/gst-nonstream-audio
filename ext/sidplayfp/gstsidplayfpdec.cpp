@@ -34,9 +34,12 @@
  */
 
 
+#ifdef HAVE_CONFIG_H
+ #include <config.h>
+#endif
+
 #include <memory>
 #include <string.h>
-#include <config.h>
 #include <gst/gst.h>
 
 #include <sidplayfp/sidplayfp.h>

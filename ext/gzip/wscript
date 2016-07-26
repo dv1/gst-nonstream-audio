@@ -20,6 +20,7 @@ def build(bld):
 		uselib = 'GSTREAMER GSTREAMER_BASE ZLIB',
 		target = 'gstgzip',
 		source = source,
+		defines = ['HAVE_CONFIG_H'],
 		install_path = bld.env['PLUGIN_INSTALL_PATH']
 	)
 

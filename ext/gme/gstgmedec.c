@@ -1,4 +1,7 @@
-#include <config.h>
+#ifdef HAVE_CONFIG_H
+ #include <config.h>
+#endif
+
 #include <gst/gst.h>
 #include <stdio.h>
 #include <stdarg.h>

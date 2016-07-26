@@ -34,6 +34,7 @@ def build(bld):
 		use = 'gstnonstreamaudio',
 		target = 'gstdumb',
 		source = dumb_source,
+		defines = ['HAVE_CONFIG_H'],
 		install_path = bld.env['PLUGIN_INSTALL_PATH']
 	)
 
