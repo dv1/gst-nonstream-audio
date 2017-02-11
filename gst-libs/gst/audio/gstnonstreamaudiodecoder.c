@@ -1240,9 +1240,9 @@ static gboolean gst_nonstream_audio_decoder_finish_load(GstNonstreamAudioDecoder
 {
 	/* must be called with lock */
 
-	GST_TRACE_OBJECT(dec, "enter finish_load");
-
 	GstNonstreamAudioDecoderClass *klass = GST_NONSTREAM_AUDIO_DECODER_CLASS(G_OBJECT_GET_CLASS(dec));
+
+	GST_TRACE_OBJECT(dec, "enter finish_load");
 
 
 	/* Prerequisites */

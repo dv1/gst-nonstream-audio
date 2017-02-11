@@ -109,7 +109,7 @@ static GstStaticPadTemplate src_template = GST_STATIC_PAD_TEMPLATE(
 
 
 
-G_DEFINE_TYPE(GstWildmidiDec, gst_wildmidi_dec, GST_TYPE_NONSTREAM_AUDIO_DECODER)
+G_DEFINE_TYPE(GstWildmidiDec, gst_wildmidi_dec, GST_TYPE_NONSTREAM_AUDIO_DECODER);
 
 
 
@@ -573,11 +573,12 @@ static guint gst_wildmidi_dec_get_num_subsongs(G_GNUC_UNUSED GstNonstreamAudioDe
 static GstClockTime gst_wildmidi_dec_get_subsong_duration(GstNonstreamAudioDecoder *dec, G_GNUC_UNUSED guint subsong)
 {
 	GstWildmidiDec *wildmidi_dec = GST_WILDMIDI_DEC(dec);
+	struct _WM_Info *info;
 
 	if (G_UNLIKELY(wildmidi_dec->song == NULL))
 		return GST_CLOCK_TIME_NONE;
 
-	struct _WM_Info *info = WildMidi_GetInfo(wildmidi_dec->song);
+	info = WildMidi_GetInfo(wildmidi_dec->song);
 	return gst_util_uint64_scale_int(info->approx_total_samples, GST_SECOND, WILDMIDI_SAMPLE_RATE);
 }
 
