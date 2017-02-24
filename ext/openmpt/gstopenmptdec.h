@@ -48,6 +48,10 @@ struct _GstOpenMptDec
 
 	guint cur_subsong, num_subsongs;
 	double *subsong_durations;
+	/* NOTE: this is of type int, not guint, because the value
+	 * is defined by OpenMPT, and can be -1 (= "all subsongs") */
+	int default_openmpt_subsong;
+	GstNonstreamAudioSubsongMode cur_subsong_mode;
 
 	gint num_loops;
 

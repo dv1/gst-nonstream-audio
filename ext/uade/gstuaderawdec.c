@@ -65,7 +65,7 @@ static void gst_uade_raw_dec_finalize(GObject *object);
 static void gst_uade_raw_dec_set_property(GObject *object, guint prop_id, const GValue *value, GParamSpec *pspec);
 static void gst_uade_raw_dec_get_property(GObject *object, guint prop_id, GValue *value, GParamSpec *pspec);
 
-static gboolean gst_uade_raw_dec_load_from_custom(GstNonstreamAudioDecoder *dec, guint initial_subsong, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode, gint *initial_num_loops);
+static gboolean gst_uade_raw_dec_load_from_custom(GstNonstreamAudioDecoder *dec, guint initial_subsong, GstNonstreamAudioSubsongMode initial_subsong_mode, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode, gint *initial_num_loops);
 
 static gboolean gst_uade_raw_dec_set_current_subsong(GstNonstreamAudioDecoder *dec, guint subsong, GstClockTime *initial_position);
 static guint gst_uade_raw_dec_get_current_subsong(GstNonstreamAudioDecoder *dec);
@@ -444,7 +444,7 @@ static void gst_uade_raw_dec_get_property(GObject *object, guint prop_id, GValue
 }
 
 
-static gboolean gst_uade_raw_dec_load_from_custom(GstNonstreamAudioDecoder *dec, guint initial_subsong, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode, gint *initial_num_loops)
+static gboolean gst_uade_raw_dec_load_from_custom(GstNonstreamAudioDecoder *dec, guint initial_subsong, G_GNUC_UNUSED GstNonstreamAudioSubsongMode initial_subsong_mode, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode, gint *initial_num_loops)
 {
 	GstUadeRawDec *uade_raw_dec;
 	int ret;

@@ -93,7 +93,7 @@ static gboolean gst_dumb_dec_seek(GstNonstreamAudioDecoder *dec, GstClockTime *n
 static GstClockTime gst_dumb_dec_tell(GstNonstreamAudioDecoder *dec);
 
 static guint gst_dumb_dec_check_initial_subsong_index(GstDumbDec *dumb_dec, guint initial_subsong);
-static gboolean gst_dumb_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, GstBuffer *source_data, guint initial_subsong, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode, gint *initial_num_loops);
+static gboolean gst_dumb_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, GstBuffer *source_data, guint initial_subsong, GstNonstreamAudioSubsongMode initial_subsong_mode, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode, gint *initial_num_loops);
 
 static gboolean gst_dumb_dec_set_current_subsong(GstNonstreamAudioDecoder *dec, guint subsong, GstClockTime *initial_position);
 static guint gst_dumb_dec_get_current_subsong(GstNonstreamAudioDecoder *dec);
@@ -411,7 +411,7 @@ static guint gst_dumb_dec_check_initial_subsong_index(GstDumbDec *dumb_dec, guin
 }
 
 
-static gboolean gst_dumb_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, GstBuffer *source_data, guint initial_subsong, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode, gint *initial_num_loops)
+static gboolean gst_dumb_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, GstBuffer *source_data, guint initial_subsong, G_GNUC_UNUSED GstNonstreamAudioSubsongMode initial_subsong_mode, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode, gint *initial_num_loops)
 {
 	gboolean ret;
 	GstDumbDec *dumb_dec = GST_DUMB_DEC(dec);

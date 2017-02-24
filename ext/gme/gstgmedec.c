@@ -80,7 +80,7 @@ static GstClockTime gst_gme_dec_tell(GstNonstreamAudioDecoder *dec);
 static GstTagList* gst_gme_dec_tags_from_track_info(GstGmeDec *gme_dec, guint track_nr);
 static GstClockTime gst_gme_dec_duration_from_track_info(GstGmeDec *gme_dec, guint track_nr);
 
-static gboolean gst_gme_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, GstBuffer *source_data, guint initial_subsong, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode, gint *initial_num_loops);
+static gboolean gst_gme_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, GstBuffer *source_data, guint initial_subsong, GstNonstreamAudioSubsongMode initial_subsong_mode, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode, gint *initial_num_loops);
 
 static void gst_gme_dec_update_effects(GstGmeDec *gme_dec);
 
@@ -412,7 +412,7 @@ static GstClockTime gst_gme_dec_duration_from_track_info(GstGmeDec *gme_dec, gui
 }
 
 
-static gboolean gst_gme_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, GstBuffer *source_data, guint initial_subsong, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode, gint *initial_num_loops)
+static gboolean gst_gme_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, GstBuffer *source_data, guint initial_subsong, G_GNUC_UNUSED GstNonstreamAudioSubsongMode initial_subsong_mode, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode, gint *initial_num_loops)
 {
 	GstMapInfo map;
 	gme_err_t err;

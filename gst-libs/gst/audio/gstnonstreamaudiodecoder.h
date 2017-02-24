@@ -49,6 +49,22 @@ typedef enum
 } GstNonstreamAudioOutputMode;
 
 
+/**
+ * GstNonstreamAudioSubsongMode:
+ * @GST_NONSTREM_AUDIO_SUBSONG_MODE_SINGLE: Only the current subsong is played
+ * @GST_NONSTREM_AUDIO_SUBSONG_MODE_ALL: All subsongs are played (current subsong index is ignored)
+ * @GST_NONSTREM_AUDIO_SUBSONG_MODE_DECODER_DEFAULT: Use decoder specific default behavior
+ *
+ * The subsong mode defines how the decoder shall handle subsongs.
+ */
+typedef enum
+{
+	GST_NONSTREM_AUDIO_SUBSONG_MODE_SINGLE,
+	GST_NONSTREM_AUDIO_SUBSONG_MODE_ALL,
+	GST_NONSTREM_AUDIO_SUBSONG_MODE_DECODER_DEFAULT
+} GstNonstreamAudioSubsongMode;
+
+
 #define GST_TYPE_NONSTREAM_AUDIO_DECODER             (gst_nonstream_audio_decoder_get_type())
 #define GST_NONSTREAM_AUDIO_DECODER(obj)             (G_TYPE_CHECK_INSTANCE_CAST((obj), GST_TYPE_NONSTREAM_AUDIO_DECODER, GstNonstreamAudioDecoder))
 #define GST_NONSTREAM_AUDIO_DECODER_CAST(obj)        ((GstNonstreamAudioDecoder *)(obj))
@@ -128,6 +144,7 @@ struct _GstNonstreamAudioDecoder
 
 	/* subsong states */
 	guint current_subsong;
+	GstNonstreamAudioSubsongMode subsong_mode;
 	GstClockTime subsong_duration;
 
 	/* output states */
@@ -177,7 +194,7 @@ struct _GstNonstreamAudioDecoder
  * @load_from_buffer:           Required if loads_from_sinkpad is set to TRUE (the default value).
  *                              Loads the media from the given buffer. The entire media is supplied at once,
  *                              so after this call, loading should be finished. This function
- *                              can also make use of a suggested initial subsong and initial
+ *                              can also make use of a suggested initial subsong & subsong mode and initial
  *                              playback position (but isn't required to). In case it chooses a different starting
  *                              position, the function must pass this position to *initial_position.
  *                              The subclass does not have to unref the input buffer; the base class does that
@@ -198,10 +215,14 @@ struct _GstNonstreamAudioDecoder
  *                              subsong than the required one, and can optionally make use of the suggested initial
  *                              position. In case it chooses a different starting position, the function must pass
  *                              this position to *initial_position.
+ *                              This function switches the subsong mode to GST_NONSTREM_AUDIO_SUBSONG_MODE_SINGLE
+ *                              automatically.
  *                              If this function is implemented by the subclass, @get_current_subsong and
  *                              @get_num_subsongs should be implemented as well.
  * @get_current_subsong:        Optional.
  *                              Returns the current subsong.
+ *                              If the current subsong mode is not GST_NONSTREM_AUDIO_SUBSONG_MODE_SINGLE, this
+ *                              function's return value is undefined.
  *                              If this function is implemented by the subclass,
  *                              @get_num_subsongs should be implemented as well.
  * @get_num_subsongs:           Optional.
@@ -219,6 +240,13 @@ struct _GstNonstreamAudioDecoder
  * @get_subsong_tags:           Optional.
  *                              Returns tags for a subsong, or NULL if there are no tags.
  *                              Returned tags will be unref'd.
+ * @set_subsong_mode:           Optional.
+ *                              Sets the current subsong mode. Since this might influence the current playback position,
+ *                              this function must set the initial_position integer argument to a defined value.
+ *                              If the playback position is not affected at all, it must be set to GST_CLOCK_TIME_NONE.
+ *                              If the subsong is restarted after the mode switch, it is recommended to set the value
+ *                              to the position in the playback right after the switch (or 0 if the subsongs are always
+ *                              reset back to the beginning).
  * @set_num_loops:              Optional.
  *                              Sets the number of loops for playback. If this is called during playback,
  *                              the subclass must set any internal loop counters to zero. A loop value of -1
@@ -228,6 +256,10 @@ struct _GstNonstreamAudioDecoder
  *                              and choose another; however, @get_num_loops should return this other value afterwards.
  *                              It is up to the subclass to define where the loop starts and ends. It can mean that only
  *                              a subset at the end or in the middle of a song is repeated, for example.
+ *                              If the current subsong mode is GST_NONSTREM_AUDIO_SUBSONG_MODE_SINGLE, then the subsong
+ *                              is repeated this many times. If it is GST_NONSTREM_AUDIO_SUBSONG_MODE_ALL, then all
+ *                              subsongs are repeated this many times. With GST_NONSTREM_AUDIO_SUBSONG_MODE_DECODER_DEFAULT,
+ *                              the behavior is decoder specific.
  * @get_num_loops:              Optional.
  *                              Returns the number of loops for playback.
  * @get_supported_output_modes: Always required.
@@ -289,8 +321,8 @@ struct _GstNonstreamAudioDecoderClass
 	gboolean     (*seek)(GstNonstreamAudioDecoder *dec, GstClockTime *new_position);
 	GstClockTime (*tell)(GstNonstreamAudioDecoder *dec);
 
-	gboolean (*load_from_buffer)(GstNonstreamAudioDecoder *dec, GstBuffer *source_data, guint initial_subsong, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode, gint *initial_num_loops);
-	gboolean (*load_from_custom)(GstNonstreamAudioDecoder *dec, guint initial_subsong, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode, gint *initial_num_loops);
+	gboolean (*load_from_buffer)(GstNonstreamAudioDecoder *dec, GstBuffer *source_data, guint initial_subsong, GstNonstreamAudioSubsongMode initial_subsong_mode, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode, gint *initial_num_loops);
+	gboolean (*load_from_custom)(GstNonstreamAudioDecoder *dec, guint initial_subsong, GstNonstreamAudioSubsongMode initial_subsong_mode, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode, gint *initial_num_loops);
 
 	GstTagList* (*get_main_tags)(GstNonstreamAudioDecoder *dec);
 
@@ -300,6 +332,7 @@ struct _GstNonstreamAudioDecoderClass
 	guint        (*get_num_subsongs)(GstNonstreamAudioDecoder *dec);
 	GstClockTime (*get_subsong_duration)(GstNonstreamAudioDecoder *dec, guint subsong);
 	GstTagList*  (*get_subsong_tags)(GstNonstreamAudioDecoder *dec, guint subsong);
+	gboolean     (*set_subsong_mode)(GstNonstreamAudioDecoder *dec, GstNonstreamAudioSubsongMode mode, GstClockTime *initial_position);
 
 	gboolean (*set_num_loops)(GstNonstreamAudioDecoder *dec, gint num_loops);
 	gint     (*get_num_loops)(GstNonstreamAudioDecoder *dec);

@@ -126,7 +126,7 @@ static void gst_sidplayfp_dec_get_property(GObject *object, guint prop_id, GValu
 
 static GstClockTime gst_sidplayfp_dec_tell(GstNonstreamAudioDecoder *dec);
 
-static gboolean gst_sidplayfp_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, GstBuffer *source_data, guint initial_subsong, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode, gint *initial_num_loops);
+static gboolean gst_sidplayfp_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, GstBuffer *source_data, guint initial_subsong, GstNonstreamAudioSubsongMode initial_subsong_mode, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode, gint *initial_num_loops);
 
 static GstTagList* gst_sidplayfp_dec_get_main_tags(GstNonstreamAudioDecoder *dec);
 
@@ -567,7 +567,7 @@ static GstClockTime gst_sidplayfp_dec_tell(GstNonstreamAudioDecoder *dec)
 }
 
 
-static gboolean gst_sidplayfp_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, GstBuffer *source_data, guint initial_subsong, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode, gint *initial_num_loops)
+static gboolean gst_sidplayfp_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, GstBuffer *source_data, guint initial_subsong, G_GNUC_UNUSED GstNonstreamAudioSubsongMode initial_subsong_mode, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode, gint *initial_num_loops)
 {
 	GstSidplayfpDec *sidplayfp_dec = GST_SIDPLAYFP_DEC(dec);
 	guint max_num_sids;

@@ -109,7 +109,7 @@ static GstClockTime gst_openmpt_dec_tell(GstNonstreamAudioDecoder *dec);
 
 static void gst_openmpt_dec_log_func(char const *message, void *user);
 static void gst_openmpt_dec_add_metadata_to_tag_list(GstOpenMptDec *openmpt_dec, GstTagList *tags, char const *key, gchar const *tag);
-static gboolean gst_openmpt_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, GstBuffer *source_data, guint initial_subsong, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode, gint *initial_num_loops);
+static gboolean gst_openmpt_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, GstBuffer *source_data, guint initial_subsong, GstNonstreamAudioSubsongMode initial_subsong_mode, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode, gint *initial_num_loops);
 
 static GstTagList* gst_openmpt_dec_get_main_tags(GstNonstreamAudioDecoder *dec);
 
@@ -119,12 +119,15 @@ static guint gst_openmpt_dec_get_current_subsong(GstNonstreamAudioDecoder *dec);
 static guint gst_openmpt_dec_get_num_subsongs(GstNonstreamAudioDecoder *dec);
 static GstClockTime gst_openmpt_dec_get_subsong_duration(GstNonstreamAudioDecoder *dec, guint subsong);
 static GstTagList* gst_openmpt_dec_get_subsong_tags(GstNonstreamAudioDecoder *dec, guint subsong);
+static gboolean gst_openmpt_dec_set_subsong_mode(GstNonstreamAudioDecoder *dec, GstNonstreamAudioSubsongMode mode, GstClockTime *initial_position);
 
 static gboolean gst_openmpt_dec_set_num_loops(GstNonstreamAudioDecoder *dec, gint num_loops);
 static gint gst_openmpt_dec_get_num_loops(GstNonstreamAudioDecoder *dec);
 
 static guint gst_openmpt_dec_get_supported_output_modes(GstNonstreamAudioDecoder *dec);
 static gboolean gst_openmpt_dec_decode(GstNonstreamAudioDecoder *dec, GstBuffer **buffer, guint *num_samples);
+
+static gboolean gst_openmpt_dec_select_subsong(GstOpenMptDec *openmpt_dec, GstNonstreamAudioSubsongMode subsong_mode, gint openmpt_subsong);
 
 
 
@@ -160,6 +163,7 @@ void gst_openmpt_dec_class_init(GstOpenMptDecClass *klass)
 	dec_class->get_num_subsongs = GST_DEBUG_FUNCPTR(gst_openmpt_dec_get_num_subsongs);
 	dec_class->get_subsong_duration = GST_DEBUG_FUNCPTR(gst_openmpt_dec_get_subsong_duration);
 	dec_class->get_subsong_tags = GST_DEBUG_FUNCPTR(gst_openmpt_dec_get_subsong_tags);
+	dec_class->set_subsong_mode = GST_DEBUG_FUNCPTR(gst_openmpt_dec_set_subsong_mode);
 
 	gst_element_class_set_static_metadata(
 		element_class,
@@ -460,7 +464,7 @@ static void gst_openmpt_dec_add_metadata_to_tag_list(GstOpenMptDec *openmpt_dec,
 }
 
 
-static gboolean gst_openmpt_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, GstBuffer *source_data, guint initial_subsong, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode, gint *initial_num_loops)
+static gboolean gst_openmpt_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, GstBuffer *source_data, guint initial_subsong, GstNonstreamAudioSubsongMode initial_subsong_mode, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode, gint *initial_num_loops)
 {
 	GstMapInfo map;
 	GstOpenMptDec *openmpt_dec;
@@ -493,6 +497,10 @@ static gboolean gst_openmpt_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, 
 		return FALSE;
 	}
 
+	/* Copy subsong states */
+	openmpt_dec->cur_subsong = initial_subsong;
+	openmpt_dec->cur_subsong_mode = initial_subsong_mode;
+
 	/* Query the number of subsongs available for logging and for checking
 	 * the initial subsong index */
 	openmpt_dec->num_subsongs = openmpt_module_get_num_subsongs(openmpt_dec->mod);
@@ -502,6 +510,32 @@ static gboolean gst_openmpt_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, 
 		initial_subsong = 0;
 	}
 	GST_INFO_OBJECT(openmpt_dec, "%d subsong(s) available", openmpt_dec->num_subsongs);
+
+	/* Query the OpenMPT default subsong (can be -1)
+	 * The default subsong is the one that is initially selected, so we
+	 * need to query it here, *before* any openmpt_module_select_subsong()
+	 * calls are done */
+	{
+		gchar const * subsong_cstr = openmpt_module_ctl_get(openmpt_dec->mod, "subsong");
+		gchar *endptr;
+
+		if (subsong_cstr != NULL)
+		{
+			openmpt_dec->default_openmpt_subsong = g_ascii_strtoll(subsong_cstr, &endptr, 10);
+			if (subsong_cstr == endptr)
+			{
+				GST_WARNING_OBJECT(openmpt_dec, "could not convert ctl string \"%s\" to subsong index - using default OpenMPT index -1 instead", subsong_cstr);
+				openmpt_dec->default_openmpt_subsong = -1;
+			}
+			else
+				GST_DEBUG_OBJECT(openmpt_dec, "default OpenMPT subsong index is %d", openmpt_dec->default_openmpt_subsong);
+		}
+		else
+		{
+			GST_INFO_OBJECT(openmpt_dec, "could not get subsong ctl string - using default OpenMPT index -1 instead");
+			openmpt_dec->default_openmpt_subsong = -1;
+		}
+	}
 
 	/* Seek to initial position */
 	if (*initial_position != 0)
@@ -535,7 +569,7 @@ static gboolean gst_openmpt_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, 
 	}
 
 	/* Select the initial subsong */
-	openmpt_module_select_subsong(openmpt_dec->mod, initial_subsong);
+	gst_openmpt_dec_select_subsong(openmpt_dec, initial_subsong_mode, initial_subsong);
 
 	/* Set the number of loops, and query the actual number
 	 * that was chosen by OpenMPT */
@@ -611,9 +645,10 @@ static gboolean gst_openmpt_dec_set_current_subsong(GstNonstreamAudioDecoder *de
 	GstOpenMptDec *openmpt_dec = GST_OPENMPT_DEC(dec);
 	g_return_val_if_fail(openmpt_dec->mod != NULL, FALSE);
 
-	if (openmpt_module_select_subsong(openmpt_dec->mod, subsong))
+	if (gst_openmpt_dec_select_subsong(openmpt_dec, openmpt_dec->cur_subsong_mode, subsong))
 	{
-		GST_DEBUG_OBJECT(openmpt_dec, "selected subsong %u", subsong);
+		GST_DEBUG_OBJECT(openmpt_dec, "selected subsong %u and switching subsong mode to SINGLE", subsong);
+		openmpt_dec->cur_subsong_mode = GST_NONSTREM_AUDIO_SUBSONG_MODE_SINGLE;
 		openmpt_dec->cur_subsong = subsong;
 		*initial_position = 0;
 		return TRUE;
@@ -671,6 +706,26 @@ static GstTagList* gst_openmpt_dec_get_subsong_tags(GstNonstreamAudioDecoder *de
 	}
 	else
 		return NULL;
+}
+
+
+static gboolean gst_openmpt_dec_set_subsong_mode(GstNonstreamAudioDecoder *dec, GstNonstreamAudioSubsongMode mode, GstClockTime *initial_position)
+{
+	GstOpenMptDec *openmpt_dec = GST_OPENMPT_DEC(dec);
+	g_return_val_if_fail(openmpt_dec->mod != NULL, FALSE);
+
+	if (gst_openmpt_dec_select_subsong(openmpt_dec, mode, openmpt_dec->cur_subsong))
+	{
+		GST_DEBUG_OBJECT(openmpt_dec, "set subsong mode");
+		openmpt_dec->cur_subsong_mode = mode;
+		*initial_position = 0;
+		return TRUE;
+	}
+	else
+	{
+		GST_ERROR_OBJECT(openmpt_dec, "could not set subsong mode");
+		return FALSE;
+	}
 }
 
 
@@ -789,4 +844,33 @@ static gboolean gst_openmpt_dec_decode(GstNonstreamAudioDecoder *dec, GstBuffer 
 	*num_samples = num_read_samples;
 
 	return TRUE;
+}
+
+
+static gboolean gst_openmpt_dec_select_subsong(GstOpenMptDec *openmpt_dec, GstNonstreamAudioSubsongMode subsong_mode, gint openmpt_subsong)
+{
+	switch (subsong_mode)
+	{
+		case GST_NONSTREM_AUDIO_SUBSONG_MODE_SINGLE:
+			GST_DEBUG_OBJECT(openmpt_dec, "setting subsong mode to SINGLE");
+			return openmpt_module_select_subsong(openmpt_dec->mod, openmpt_subsong);
+
+		case GST_NONSTREM_AUDIO_SUBSONG_MODE_ALL:
+			GST_DEBUG_OBJECT(openmpt_dec, "setting subsong mode to ALL");
+			return openmpt_module_select_subsong(openmpt_dec->mod, -1);
+
+		case GST_NONSTREM_AUDIO_SUBSONG_MODE_DECODER_DEFAULT:
+			/* NOTE: The OpenMPT documentation recommends to not bother
+			 * calling openmpt_module_select_subsong() if the decoder
+			 * default shall be used. However, the user might have switched
+			 * the subsong mode from SINGLE or ALL to DECODER_DEFAULT,
+			 * in which case we *do* have to set the default subsong index.
+			 * So, just set the default index here. */
+			GST_DEBUG_OBJECT(openmpt_dec, "setting subsong mode to DECODER_DEFAULT");
+			return openmpt_module_select_subsong(openmpt_dec->mod, openmpt_dec->default_openmpt_subsong);
+
+		default:
+			g_assert_not_reached();
+			return TRUE;
+	}
 }

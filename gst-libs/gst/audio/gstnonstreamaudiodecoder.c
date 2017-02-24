@@ -199,11 +199,13 @@ enum
 {
 	PROP_0,
 	PROP_CURRENT_SUBSONG,
+	PROP_SUBSONG_MODE,
 	PROP_NUM_LOOPS,
 	PROP_OUTPUT_MODE
 };
 
 #define DEFAULT_CURRENT_SUBSONG 0
+#define DEFAULT_SUBSONG_MODE GST_NONSTREM_AUDIO_SUBSONG_MODE_DECODER_DEFAULT
 #define DEFAULT_NUM_SUBSONGS 0
 #define DEFAULT_NUM_LOOPS 0
 #define DEFAULT_OUTPUT_MODE GST_NONSTREM_AUDIO_OUTPUT_MODE_STEADY
@@ -265,6 +267,9 @@ static char const * get_seek_type_name(GstSeekType seek_type);
 static GType gst_nonstream_audio_decoder_output_mode_get_type(void);
 #define GST_TYPE_NONSTREAM_AUDIO_DECODER_OUTPUT_MODE (gst_nonstream_audio_decoder_output_mode_get_type())
 
+static GType gst_nonstream_audio_decoder_subsong_mode_get_type(void);
+#define GST_TYPE_NONSTREAM_AUDIO_DECODER_SUBSONG_MODE (gst_nonstream_audio_decoder_subsong_mode_get_type())
+
 
 static GType gst_nonstream_audio_decoder_output_mode_get_type(void)
 {
@@ -286,6 +291,30 @@ static GType gst_nonstream_audio_decoder_output_mode_get_type(void)
 	}
 
 	return gst_nonstream_audio_decoder_output_mode_type;
+}
+
+
+static GType gst_nonstream_audio_decoder_subsong_mode_get_type(void)
+{
+	static GType gst_nonstream_audio_decoder_subsong_mode_type = 0;
+
+	if (!gst_nonstream_audio_decoder_subsong_mode_type)
+	{
+		static GEnumValue subsong_mode_values[] =
+		{
+			{ GST_NONSTREM_AUDIO_SUBSONG_MODE_SINGLE,          "Play single subsong",               "single"  },
+			{ GST_NONSTREM_AUDIO_SUBSONG_MODE_ALL,             "Play all subsongs",                 "all"     },
+			{ GST_NONSTREM_AUDIO_SUBSONG_MODE_DECODER_DEFAULT, "Decoder specific default behavior", "default" },
+			{ 0, NULL, NULL },
+		};
+
+		gst_nonstream_audio_decoder_subsong_mode_type = g_enum_register_static(
+			"NonstreamAudioSubsongMode",
+			subsong_mode_values
+		);
+	}
+
+	return gst_nonstream_audio_decoder_subsong_mode_type;
 }
 
 
@@ -362,6 +391,7 @@ static void gst_nonstream_audio_decoder_class_init(GstNonstreamAudioDecoderClass
 	klass->get_num_subsongs = NULL;
 	klass->get_subsong_duration = NULL;
 	klass->get_subsong_tags = NULL;
+	klass->set_subsong_mode = NULL;
 
 	klass->set_num_loops = NULL;
 	klass->get_num_loops = NULL;
@@ -384,6 +414,19 @@ static void gst_nonstream_audio_decoder_class_init(GstNonstreamAudioDecoderClass
 			"Subsong that is currently selected for playback",
 			0, G_MAXUINT,
 			DEFAULT_CURRENT_SUBSONG,
+			G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS
+		)
+	);
+
+	g_object_class_install_property(
+		object_class,
+		PROP_SUBSONG_MODE,
+		g_param_spec_enum(
+			"subsong-mode",
+			"Subsong mode",
+			"Mode which defines how to treat subsongs",
+			GST_TYPE_NONSTREAM_AUDIO_DECODER_SUBSONG_MODE,
+			DEFAULT_SUBSONG_MODE,
 			G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS
 		)
 	);
@@ -424,6 +467,7 @@ static void gst_nonstream_audio_decoder_init(GstNonstreamAudioDecoder *dec, GstN
 	 * because these are values for the properties; they are not supposed to be
 	 * reset in the READY->NULL state change */
 	dec->current_subsong = DEFAULT_CURRENT_SUBSONG;
+	dec->subsong_mode = DEFAULT_SUBSONG_MODE;
 	dec->output_mode = DEFAULT_OUTPUT_MODE;
 	dec->num_loops = DEFAULT_NUM_LOOPS;
 
@@ -543,6 +587,51 @@ static void gst_nonstream_audio_decoder_set_property(GObject *object, guint prop
 			break;
 		}
 
+		case PROP_SUBSONG_MODE:
+		{
+			GstNonstreamAudioSubsongMode new_subsong_mode = g_value_get_enum(value);
+
+			GST_NONSTREAM_AUDIO_DECODER_LOCK_MUTEX(dec);
+			if (new_subsong_mode != dec->subsong_mode)
+			{
+				gboolean proceed = TRUE;
+
+				if (dec->loaded_mode)
+				{
+					GstClockTime cur_position;
+
+					if (klass->set_subsong_mode != NULL)
+					{
+						if (klass->set_subsong_mode(dec, new_subsong_mode, &cur_position))
+							proceed = TRUE;
+						else
+						{
+							proceed = FALSE;
+							GST_WARNING_OBJECT(dec, "switching to new subsong mode failed");
+						}
+					}
+					else
+						GST_DEBUG_OBJECT(dec, "cannot call set_subsong_mode, since it is NULL");
+
+					if (proceed)
+					{
+						if (GST_CLOCK_TIME_IS_VALID(cur_position))
+							gst_nonstream_audio_decoder_output_new_segment(dec, cur_position);
+						dec->subsong_mode = new_subsong_mode;
+					}
+				}
+
+				if (proceed)
+				{
+					/* store subsong mode in case the property is set before the media got loaded */
+					dec->subsong_mode = new_subsong_mode;
+				}
+			}
+			GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(dec);
+
+			break;
+		}
+
 		case PROP_NUM_LOOPS:
 		{
 			gint new_num_loops = g_value_get_int(value);
@@ -594,6 +683,14 @@ static void gst_nonstream_audio_decoder_get_property(GObject *object, guint prop
 		{
 			GST_NONSTREAM_AUDIO_DECODER_LOCK_MUTEX(dec);
 			g_value_set_uint(value, dec->current_subsong);
+			GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(dec);
+			break;
+		}
+
+		case PROP_SUBSONG_MODE:
+		{
+			GST_NONSTREAM_AUDIO_DECODER_LOCK_MUTEX(dec);
+			g_value_set_enum(value, dec->subsong_mode);
 			GST_NONSTREAM_AUDIO_DECODER_UNLOCK_MUTEX(dec);
 			break;
 		}
@@ -1200,7 +1297,7 @@ static gboolean gst_nonstream_audio_decoder_load_from_buffer(GstNonstreamAudioDe
 	GST_LOG_OBJECT(dec, "read %" G_GSIZE_FORMAT " bytes from upstream", gst_buffer_get_size(buffer));
 
 	initial_position = 0;
-	load_ok = klass->load_from_buffer(dec, buffer, dec->current_subsong, &initial_position, &(dec->output_mode), &(dec->num_loops));
+	load_ok = klass->load_from_buffer(dec, buffer, dec->current_subsong, dec->subsong_mode, &initial_position, &(dec->output_mode), &(dec->num_loops));
 	gst_buffer_unref(buffer);
 
 	ret = gst_nonstream_audio_decoder_finish_load(dec, load_ok, initial_position, FALSE);
@@ -1226,7 +1323,7 @@ static gboolean gst_nonstream_audio_decoder_load_from_custom(GstNonstreamAudioDe
 	GST_LOG_OBJECT(dec, "reading song from custom source defined by derived class");
 
 	initial_position = 0;
-	load_ok = klass->load_from_custom(dec, dec->current_subsong, &initial_position, &(dec->output_mode), &(dec->num_loops));
+	load_ok = klass->load_from_custom(dec, dec->current_subsong, dec->subsong_mode, &initial_position, &(dec->output_mode), &(dec->num_loops));
 
 	ret = gst_nonstream_audio_decoder_finish_load(dec, load_ok, initial_position, TRUE);
 

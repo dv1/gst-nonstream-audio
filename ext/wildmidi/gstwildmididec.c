@@ -121,7 +121,7 @@ static void gst_wildmidi_dec_get_property(GObject *object, guint prop_id, GValue
 static gboolean gst_wildmidi_dec_seek(GstNonstreamAudioDecoder *dec, GstClockTime *new_position);
 static GstClockTime gst_wildmidi_dec_tell(GstNonstreamAudioDecoder *dec);
 
-static gboolean gst_wildmidi_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, GstBuffer *source_data, guint initial_subsong, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode, gint *initial_num_loops);
+static gboolean gst_wildmidi_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, GstBuffer *source_data, guint initial_subsong, GstNonstreamAudioSubsongMode initial_subsong_mode, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode, gint *initial_num_loops);
 
 static guint gst_wildmidi_dec_get_current_subsong(GstNonstreamAudioDecoder *dec);
 
@@ -504,7 +504,7 @@ static GstClockTime gst_wildmidi_dec_tell(GstNonstreamAudioDecoder *dec)
 }
 
 
-static gboolean gst_wildmidi_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, GstBuffer *source_data, G_GNUC_UNUSED guint initial_subsong, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode, G_GNUC_UNUSED gint *initial_num_loops)
+static gboolean gst_wildmidi_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, GstBuffer *source_data, G_GNUC_UNUSED guint initial_subsong, G_GNUC_UNUSED GstNonstreamAudioSubsongMode initial_subsong_mode, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode, G_GNUC_UNUSED gint *initial_num_loops)
 {
 	GstWildmidiDec *wildmidi_dec = GST_WILDMIDI_DEC(dec);
 	GstMapInfo buffer_map;
