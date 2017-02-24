@@ -111,7 +111,7 @@ static void gst_openmpt_dec_log_func(char const *message, void *user);
 static void gst_openmpt_dec_add_metadata_to_tag_list(GstOpenMptDec *openmpt_dec, GstTagList *tags, char const *key, gchar const *tag);
 static gboolean gst_openmpt_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, GstBuffer *source_data, guint initial_subsong, GstClockTime *initial_position, GstNonstreamAudioOutputMode *initial_output_mode, gint *initial_num_loops);
 
-GstTagList* gst_openmpt_dec_get_main_tags(GstNonstreamAudioDecoder *dec);
+static GstTagList* gst_openmpt_dec_get_main_tags(GstNonstreamAudioDecoder *dec);
 
 static gboolean gst_openmpt_dec_set_current_subsong(GstNonstreamAudioDecoder *dec, guint subsong, GstClockTime *initial_position);
 static guint gst_openmpt_dec_get_current_subsong(GstNonstreamAudioDecoder *dec);
@@ -599,7 +599,7 @@ static gboolean gst_openmpt_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, 
 }
 
 
-GstTagList* gst_openmpt_dec_get_main_tags(GstNonstreamAudioDecoder *dec)
+static GstTagList* gst_openmpt_dec_get_main_tags(GstNonstreamAudioDecoder *dec)
 {
 	GstOpenMptDec *openmpt_dec = GST_OPENMPT_DEC(dec);
 	return gst_tag_list_ref(openmpt_dec->main_tags);
