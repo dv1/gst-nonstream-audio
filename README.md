@@ -33,9 +33,6 @@ Available plugins
 * gme : video game music decoder using the Game Music Emulator library. As with DUMB, an
   improved fork is used.
 * openmpt : module music decoder using libopenmpt, a library version of [OpenMPT](http://openmpt.org/).
-  libopenmpt is part of an extensive OpenMPT refactoring, and thus has an unstable API at the moment.
-  It works fine, but may not build with coming libopenmpt versions due to the unstable API. For this
-  reason, it is disabled by default (use `--enable-openmpt` with `./waf configure` below).
 * wildmidi: MIDI music decoder using the [WildMidi software synthesizer](https://www.mindwerks.net/projects/wildmidi/).
 * sidplayfp: SID music decoder using the [sidplayfp library](https://sourceforge.net/p/sidplay-residfp/wiki/Home/).
 * uade: Amiga music decoder using [UADE](http://zakalwe.fi/uade/).
