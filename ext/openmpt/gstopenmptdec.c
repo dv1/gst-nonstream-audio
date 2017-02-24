@@ -529,6 +529,8 @@ static gboolean gst_openmpt_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, 
 			}
 			else
 				GST_DEBUG_OBJECT(openmpt_dec, "default OpenMPT subsong index is %d", openmpt_dec->default_openmpt_subsong);
+
+			openmpt_free_string(subsong_cstr);
 		}
 		else
 		{
