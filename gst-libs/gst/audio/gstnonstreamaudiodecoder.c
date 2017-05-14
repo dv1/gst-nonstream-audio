@@ -880,6 +880,10 @@ static GstFlowReturn gst_nonstream_audio_decoder_chain(G_GNUC_UNUSED GstPad *pad
 	GstFlowReturn flow_ret = GST_FLOW_OK;
 	GstNonstreamAudioDecoder *dec = GST_NONSTREAM_AUDIO_DECODER(parent);
 
+	/* query upstream size in bytes to know how many bytes to expect
+	 * this is a safety measure to prevent the case when upstream never
+	 * reaches EOS (or only after a long time) and we keep loading and
+	 * loading and eventually run out of memory */
 	if (dec->upstream_size < 0)
 	{
 		if (!gst_nonstream_audio_decoder_get_upstream_size(dec, &(dec->upstream_size)))
@@ -2279,9 +2283,12 @@ gboolean gst_nonstream_audio_decoder_set_output_format_simple(GstNonstreamAudioD
  *
  * "audio/x-raw, format={S16LE,S32LE}, rate=[1,32000], channels=[1,MAX]"
  *
- * Then @format and @channels stay the same, while @rate is set to 32000 Hz.
+ * Then @format and @channels stay the same, while @sample_rate is set to 32000 Hz.
  * This way, the initial values the the variables pointed to by the arguments
- * are set to can be used as default output values.
+ * are set to can be used as default output values. Note that if no downstream
+ * caps can be retrieved, then this function does nothing, therefore it is
+ * necessary to ensure that @format, @sample_rate, and @channels have valid
+ * initial values.
  *
  * Decoder lock is not held by this function, so it can be called from within
  * any of the class vfuncs.
