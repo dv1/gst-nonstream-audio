@@ -2302,6 +2302,11 @@ void gst_nonstream_audio_decoder_get_downstream_info(GstNonstreamAudioDecoder *d
 	g_return_if_fail(GST_IS_NONSTREAM_AUDIO_DECODER(dec));
 
 	allowed_srccaps = gst_pad_get_allowed_caps(dec->srcpad);
+	if (allowed_srccaps == NULL)
+	{
+		GST_INFO_OBJECT(dec, "no downstream caps available - not modifying arguments");
+		return;
+	}
 
 	num_structures = gst_caps_get_size(allowed_srccaps);
 	GST_DEBUG_OBJECT(dec, "%u structure(s) in downstream caps", num_structures);
