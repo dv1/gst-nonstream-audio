@@ -46,6 +46,7 @@ def options(opt):
 	opt.add_option('--with-package-origin', action = 'store', default = "Unknown package origin", help = 'specify package origin URL to use in plugin [default: %default]')
 	opt.add_option('--lib-install-path', action = 'store', default = "${PREFIX}/lib", help = 'where to install the libraries [default: %default]')
 	opt.add_option('--plugin-install-path', action = 'store', default = "${PREFIX}/lib/gstreamer-1.0", help = 'where to install the plugin for GStreamer 1.0 [default: %default]')
+	opt.add_option('--disable-base-class', action = 'store_true', default = False, help = 'disable the base class compilation (needed for using the base classes from GStreamer >= 1.14.0 instead) [default: %default]')
 	opt.load('compiler_c')
 	opt.load('compiler_cxx')
 	for plugin in plugins.keys():
@@ -117,6 +118,13 @@ def configure(conf):
 	conf.define('PACKAGE', "gstnonstreamaudio")
 	conf.define('VERSION', "1.0")
 
+	conf.env['BUILD_BASE_CLASS'] = not conf.options.disable_base_class
+	if conf.options.disable_base_class:
+		conf.check_cfg(package = 'gstreamer-bad-audio-1.0 >= 1.2.0', uselib_store = 'GSTREAMER_AUDIO', args = '--cflags --libs', mandatory = 1)
+		Logs.pprint('NORMAL', 'NOT building the base class')
+	else:
+		Logs.pprint('NORMAL', 'Building the base class')
+
 	conf.env['ENABLED_PLUGINS'] = []
 	conf.env['DISABLED_PLUGINS'] = {}
 
@@ -144,15 +152,16 @@ def configure(conf):
 
 def build(bld):
 	nonstreamaudio_source = bld.srcnode.ant_glob('gst-libs/gst/audio/*.c')
-	bld(
-		features = ['c', 'cshlib'],
-		includes = ['.', 'gst-libs'],
-		uselib = 'GSTREAMER GSTREAMER_BASE GSTREAMER_AUDIO',
-		target = 'gstnonstreamaudio',
-		name = 'gstnonstreamaudio',
-		source = nonstreamaudio_source,
-		install_path = bld.env['LIB_INSTALL_PATH']
-	)
+	if bld.env['BUILD_BASE_CLASS']:
+		bld(
+			features = ['c', 'cshlib'],
+			includes = ['.', 'gst-libs'],
+			uselib = 'GSTREAMER GSTREAMER_BASE GSTREAMER_AUDIO',
+			target = 'gstnonstreamaudio',
+			name = 'gstnonstreamaudio',
+			source = nonstreamaudio_source,
+			install_path = bld.env['LIB_INSTALL_PATH']
+		)
 
 	bld.recurse('gst/umxparse')
 
