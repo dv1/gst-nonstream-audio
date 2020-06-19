@@ -201,6 +201,7 @@ void gst_gme_dec_init(GstGmeDec *gme_dec)
 	gme_dec->emu = NULL;
 	gme_dec->cur_track = 0;
 	gme_dec->num_tracks = 0;
+	gme_dec->num_loops = 0;
 
 	gme_dec->echo = DEFAULT_ECHO;
 	gme_dec->stereo_separation = DEFAULT_STEREO_SEPARATION;
@@ -337,7 +338,9 @@ static GstClockTime gst_gme_dec_tell(GstNonstreamAudioDecoder *dec)
 	GstGmeDec *gme_dec = GST_GME_DEC(dec);
 	g_return_val_if_fail(gme_dec->emu != NULL, GST_CLOCK_TIME_NONE);
 
-	return (GstClockTime)(gme_tell(gme_dec->emu)) * GST_MSECOND;
+	guint64 time = (GstClockTime)(gme_tell(gme_dec->emu)) * GST_MSECOND;
+
+	return time;
 }
 
 
@@ -403,7 +406,12 @@ static GstClockTime gst_gme_dec_duration_from_track_info(GstGmeDec *gme_dec, gui
 			track_info->loop_length,
 			track_info->play_length
 		);
-		duration = (GstClockTime)(track_info->play_length) * GST_MSECOND;
+
+		if (gme_dec->num_loops < 0) {
+			duration = (GstClockTime)(track_info->play_length) * GST_MSECOND;
+		} else {
+			duration = (GstClockTime)(track_info->intro_length + track_info->loop_length * gme_dec->num_loops) * GST_MSECOND;
+		}
 	}
 
 	gme_free_info(track_info);
@@ -418,7 +426,7 @@ static gboolean gst_gme_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, GstB
 	gme_err_t err;
 	GstGmeDec *gme_dec;
 	gint sample_rate;
-	
+
 	gme_dec = GST_GME_DEC(dec);
 
 	sample_rate = 48000;
@@ -463,6 +471,7 @@ static gboolean gst_gme_dec_load_from_buffer(GstNonstreamAudioDecoder *dec, GstB
 	*initial_output_mode = GST_NONSTREM_AUDIO_OUTPUT_MODE_STEADY;
 
 	gst_gme_dec_update_effects(gme_dec);
+	gst_gme_dec_set_num_loops(dec, *initial_num_loops);
 
 	return TRUE;
 }
@@ -539,13 +548,42 @@ static guint gst_gme_dec_get_supported_output_modes(G_GNUC_UNUSED GstNonstreamAu
 /* TODO: looping control */
 static gboolean gst_gme_dec_set_num_loops(GstNonstreamAudioDecoder *dec, gint num_loops)
 {
-	return 0;
+	GstGmeDec *gme_dec = GST_GME_DEC(dec);
+
+	if (G_UNLIKELY(gme_dec->emu == NULL))
+		return FALSE;
+
+	gme_info_t* trackinfo = NULL;
+	gme_track_info(gme_dec->emu, &trackinfo, gme_dec->cur_track);
+
+	const gint32 DEFAULT_TRACK_LENGTH = 150000;
+
+	if (G_UNLIKELY(gme_dec->emu == NULL))
+    		return FALSE;
+
+	gme_dec->num_loops = num_loops;
+
+	if (num_loops >= 0 && trackinfo->loop_length > 0) {
+		gme_set_fade(gme_dec->emu, trackinfo->intro_length + (trackinfo->loop_length * num_loops), trackinfo->loop_length / 16 );
+	}
+	else if (num_loops >= 0) {
+		gme_set_fade(gme_dec->emu, trackinfo->play_length, 1000);
+	}
+
+	gme_free_info(trackinfo);
+
+	return TRUE;
 }
 
 
 static gint gst_gme_dec_get_num_loops(GstNonstreamAudioDecoder *dec)
 {
-	return 0;
+	GstGmeDec *gme_dec = GST_GME_DEC(dec);
+
+	if (G_UNLIKELY(gme_dec->emu == NULL))
+		return FALSE;
+
+	return gme_dec->num_loops;
 }
 
 
@@ -561,6 +599,11 @@ static gboolean gst_gme_dec_decode(GstNonstreamAudioDecoder *dec, GstBuffer **bu
 
 	gme_dec = GST_GME_DEC(dec);
 
+	if (gme_track_ended(gme_dec->emu)) {
+		GST_INFO_OBJECT(gme_dec, "GME reached end of module");
+		return FALSE;
+	}
+
 	outbuf = gst_nonstream_audio_decoder_allocate_output_buffer(dec, num_bytes_per_outbuf);
 	if (G_UNLIKELY(outbuf == NULL))
 		return FALSE;
@@ -569,8 +612,7 @@ static gboolean gst_gme_dec_decode(GstNonstreamAudioDecoder *dec, GstBuffer **bu
 	err = gme_play(gme_dec->emu, num_samples_per_outbuf * 2 /* 2 channels */ , (short *) (map.data));
 	gst_buffer_unmap(outbuf, &map);
 
-	if (G_UNLIKELY(err != NULL))
-	{
+	if (G_UNLIKELY(err != NULL)) {
 		GST_ERROR_OBJECT(dec, "error while decoding: %s", err);
 		gst_buffer_unref(outbuf);
 		return FALSE;
@@ -578,7 +620,6 @@ static gboolean gst_gme_dec_decode(GstNonstreamAudioDecoder *dec, GstBuffer **bu
 
 	*buffer = outbuf;
 	*num_samples = num_samples_per_outbuf;
-
 	return TRUE;
 }
 
@@ -611,4 +652,3 @@ GST_PLUGIN_DEFINE(
 	"package",
 	"http://no-url-yet"
 )
-
